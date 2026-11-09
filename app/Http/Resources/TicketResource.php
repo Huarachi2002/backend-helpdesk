@@ -19,6 +19,8 @@ class TicketResource extends JsonResource
             'title'       => $this->title,
             'description' => $this->description,
             'status'      => $this->status,
+            'status_label'=> $this->state()->label(),
+            'allowed_transitions' => $this->allowedTransitions(),
             'priority'    => $this->priority,
 
             'moodle_data' => [
@@ -46,11 +48,13 @@ class TicketResource extends JsonResource
 
             'history' => $this->whenLoaded('history', fn() =>
                 $this->history->map(fn($h) => [
-                    'old_status' => $h->old_status,
-                    'new_status' => $h->new_status,
-                    'comments'   => $h->comments,
-                    'changed_by' => $h->changer ? $h->changer->name : null,
-                    'changed_at' => $h->created_at->toDateTimeString(),
+                    'id'           => $h->id,
+                    'old_status'   => $h->old_status,
+                    'new_status'   => $h->new_status,
+                    'comments'     => $h->comments,
+                    'changed_by'   => $h->changer ? $h->changer->name : null,
+                    'changer_role' => $h->changer ? $h->changer->role : null,
+                    'changed_at'   => $h->created_at->toDateTimeString(),
                 ])
             ),
 

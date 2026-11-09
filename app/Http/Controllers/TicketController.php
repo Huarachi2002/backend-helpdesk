@@ -84,28 +84,33 @@ class TicketController extends Controller
     public function updateStatus(Request $request, $id)
     {
         $request->validate([
-            'status'   => 'required|in:open,in_progress,waiting,resolved,closed',
+            'status'   => 'required|string',
             'comments' => 'nullable|string',
         ]);
 
         $ticket = Ticket::findOrFail($id);
-        $oldStatus = $ticket->status;
 
-        $ticket->status = $request->status;
-        if ($request->status === 'resolved' && is_null($ticket->resolved_at)) {
-            $ticket->resolved_at = now();
+        try {
+            $ticket->transitionTo($request->status, $request->user(), $request->comments);
+            $ticket->load(['category', 'assignee', 'creator', 'history.changer']);
+
+            return response()->json([
+                'message' => 'Estado actualizado con éxito',
+                'data'    => new TicketResource($ticket)
+            ]);
+        } catch (\App\Exceptions\InvalidStateTransitionException $e) {
+            return response()->json([
+                'message'             => $e->getMessage(),
+                'error'               => 'invalid_state_transition',
+                'current_status'      => $e->getCurrentState(),
+                'target_status'       => $e->getTargetState(),
+                'allowed_transitions' => $e->getAllowedTransitions(),
+            ], 422);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'message' => $e->getMessage()
+            ], 422);
         }
-        $ticket->save();
-
-        TicketHistory::create([
-            'ticket_id' => $ticket->id,
-            'changed_by' => $request->user()->id,
-            'old_status' => $oldStatus,
-            'new_status' => $ticket->status,
-            'comments' => $request->comments ?? 'Cambio de estado manual.'
-        ]);
-
-        return response()->json(['message' => 'Estado actualizado', 'data' => new TicketResource($ticket)]);
     }
 
     public function reassign(Request $request, $id)
