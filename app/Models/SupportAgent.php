@@ -2,21 +2,38 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
-
-class SupportAgent extends Model
+/**
+ * Clase de soporte / compatibilidad transitoria.
+ * En la nueva estructura, los agentes y sus configuraciones
+ * se gestionan directamente a través de usuarios, roles,
+ * usuario_categoria y usuario_prioridad.
+ */
+class SupportAgent
 {
-    use HasFactory;
+    protected User $user;
 
-    protected $fillable = ['user_id', 'is_active'];
-
-    protected $casts = [
-        'is_active' => 'boolean'
-    ];
-
-    public function user()
+    public function __construct(User $user)
     {
-        return $this->belongsTo(User::class);
+        $this->user = $user;
+    }
+
+    public function __get($name)
+    {
+        if ($name === 'tier_level') {
+            return 2;
+        }
+        if ($name === 'max_active_tickets') {
+            return 10;
+        }
+        if ($name === 'is_active') {
+            return (bool) $this->user->activo;
+        }
+        if ($name === 'allowed_priorities') {
+            return $this->user->prioridades->pluck('codigo')->map(fn($c) => strtolower($c))->toArray();
+        }
+        if ($name === 'categories') {
+            return $this->user->categorias;
+        }
+        return null;
     }
 }

@@ -9,54 +9,60 @@
         p.subtitle { text-align: center; color: #7f8c8d; margin-top: 0; font-size: 10px; }
         table { width: 100%; border-collapse: collapse; margin-top: 16px; }
         th    { background: #2c3e50; color: #fff; padding: 6px 8px; text-align: left; font-size: 10px; }
-        td    { padding: 5px 8px; border-bottom: 1px solid #ecf0f1; }
+        td    { padding: 5px 8px; border-bottom: 1px solid #ecf0f1; font-size: 9.5px; }
         tr:nth-child(even) { background: #f9f9f9; }
-        .badge { padding: 2px 6px; border-radius: 3px; color: #fff; font-size: 9px; font-weight: bold; }
-        .open        { background: #3498db; }
-        .in_progress { background: #e67e22; }
-        .waiting     { background: #9b59b6; }
-        .resolved    { background: #27ae60; }
-        .closed      { background: #95a5a6; }
-        .low         { background: #27ae60; }
-        .medium      { background: #f39c12; }
-        .high        { background: #e74c3c; }
-        .critical    { background: #8e1a1a; }
+        .badge { padding: 2px 6px; border-radius: 3px; color: #fff; font-size: 8.5px; font-weight: bold; }
+        .EN_ESPERA                     { background: #3498db; }
+        .CLIENTE_ESPERANDO_RESPUESTA   { background: #e67e22; }
+        .ESPERANDO_POR_CLIENTE         { background: #9b59b6; }
+        .RESUELTO                      { background: #27ae60; }
+        .CERRADO                       { background: #95a5a6; }
+        .low                           { background: #27ae60; }
+        .medium                        { background: #f39c12; }
+        .high                          { background: #e74c3c; }
+        .critical                      { background: #8e1a1a; }
         .footer { margin-top: 20px; text-align: right; font-size: 9px; color: #95a5a6; }
     </style>
 </head>
 <body>
-    <h1>Reporte de Tickets — Helpdesk</h1>
+    <h1>Reporte de Incidencias Técnicas — Helpdesk Campus</h1>
     <p class="subtitle">Generado el {{ now()->format('d/m/Y H:i') }} | Total: {{ count($tickets) }} tickets</p>
 
     <table>
         <thead>
             <tr>
-                <th>#ID</th>
-                <th>Título</th>
-                <th>Categoría</th>
+                <th>Código</th>
+                <th>Asunto</th>
+                <th>Categoría(s)</th>
                 <th>Estado</th>
                 <th>Prioridad</th>
-                <th>Asignado a</th>
-                <th>Creado</th>
-                <th>Resuelto</th>
+                <th>Técnico Asignado</th>
+                <th>Fecha Apertura</th>
+                <th>Fecha Resolución</th>
             </tr>
         </thead>
         <tbody>
             @foreach($tickets as $ticket)
             <tr>
-                <td>{{ $ticket->id }}</td>
-                <td>{{ $ticket->title }}</td>
-                <td>{{ $ticket->category->name ?? '—' }}</td>
-                <td><span class="badge {{ $ticket->status }}">{{ strtoupper($ticket->status) }}</span></td>
-                <td><span class="badge {{ $ticket->priority }}">{{ strtoupper($ticket->priority) }}</span></td>
+                <td><strong>{{ $ticket->codigo ?? '#' . $ticket->id }}</strong></td>
+                <td>{{ $ticket->asunto ?? $ticket->title }}</td>
+                <td>
+                    @if($ticket->categorias && $ticket->categorias->count() > 0)
+                        {{ $ticket->categorias->pluck('nombre')->join(', ') }}
+                    @else
+                        {{ $ticket->category->nombre ?? $ticket->category->name ?? 'General' }}
+                    @endif
+                </td>
+                <td><span class="badge {{ $ticket->estado }}">{{ $ticket->estado }}</span></td>
+                <td><span class="badge {{ strtolower($ticket->priority) }}">{{ strtoupper($ticket->priority) }}</span></td>
                 <td>{{ $ticket->assignee->name ?? 'Sin asignar' }}</td>
-                <td>{{ $ticket->created_at->format('d/m/Y') }}</td>
-                <td>{{ $ticket->resolved_at ? $ticket->resolved_at->format('d/m/Y') : '—' }}</td>
+                <td>{{ $ticket->fecha_creacion ? $ticket->fecha_creacion->format('d/m/Y H:i') : '—' }}</td>
+                <td>{{ $ticket->fecha_resuelto ? $ticket->fecha_resuelto->format('d/m/Y H:i') : '—' }}</td>
             </tr>
             @endforeach
         </tbody>
     </table>
 
-    <div class="footer">Moodle Helpdesk &amp; Admin Panel — Reporte generado automáticamente</div>
+    <div class="footer">Helpdesk AI Campus Virtual — Reporte generado automáticamente bajo nuevo modelo relacional</div>
 </body>
 </html>

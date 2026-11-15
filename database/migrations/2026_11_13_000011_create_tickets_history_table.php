@@ -6,17 +6,12 @@ use Illuminate\Support\Facades\Schema;
 
 class CreateTicketsHistoryTable extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
     public function up()
     {
         Schema::create('tickets_history', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('ticket_id')->constrained('tickets')->onDelete('cascade');
-            $table->foreignId('changed_by')->constrained('users');
+            $table->foreignId('ticket_id')->constrained('ticket')->cascadeOnDelete();
+            $table->foreignId('changed_by')->constrained('usuarios');
             $table->string('old_status')->nullable();
             $table->string('new_status');
             $table->text('comments')->nullable();
@@ -24,11 +19,6 @@ class CreateTicketsHistoryTable extends Migration
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
     public function down()
     {
         Schema::dropIfExists('tickets_history');

@@ -12,12 +12,16 @@ class TicketHistory extends Model
     protected $table = 'tickets_history';
 
     protected $fillable = [
-        'ticket_id', 'changed_by', 'old_status', 'new_status', 'comments'
+        'ticket_id',
+        'changed_by',
+        'old_status',
+        'new_status',
+        'comments'
     ];
 
     public function ticket()
     {
-        return $this->belongsTo(Ticket::class);
+        return $this->belongsTo(Ticket::class, 'ticket_id');
     }
 
     public function changer()

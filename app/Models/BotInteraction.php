@@ -9,8 +9,15 @@ class BotInteraction extends Model
 {
     use HasFactory;
 
+    protected $table = 'bot_interactions';
+
     protected $fillable = [
-        'user_id', 'intent', 'query', 'response', 'resolved', 'resolution_time_seconds'
+        'user_id',
+        'intent',
+        'query',
+        'response',
+        'resolved',
+        'resolution_time_seconds'
     ];
 
     protected $casts = [
@@ -19,6 +26,6 @@ class BotInteraction extends Model
 
     public function user()
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(User::class, 'user_id');
     }
 }

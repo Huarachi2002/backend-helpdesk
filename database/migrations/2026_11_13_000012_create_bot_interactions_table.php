@@ -6,16 +6,11 @@ use Illuminate\Support\Facades\Schema;
 
 class CreateBotInteractionsTable extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
     public function up()
     {
         Schema::create('bot_interactions', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->nullable()->constrained('users');
+            $table->foreignId('user_id')->nullable()->constrained('usuarios');
             $table->string('intent');
             $table->text('query');
             $table->text('response');
@@ -25,11 +20,6 @@ class CreateBotInteractionsTable extends Migration
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
     public function down()
     {
         Schema::dropIfExists('bot_interactions');

@@ -11,25 +11,44 @@ class TicketExport implements FromQuery, WithHeadings, WithMapping
 {
     public function query()
     {
-        return Ticket::query()->with(['category', 'assignee']);
+        return Ticket::query()->with(['categorias', 'assignee', 'creator']);
     }
 
     public function headings(): array
     {
-        return ['ID', 'Título', 'Estado', 'Prioridad', 'Categoría', 'Agente', 'Fecha Creación', 'Fecha Resolución'];
+        return [
+            'ID',
+            'Código',
+            'Asunto',
+            'Estado',
+            'Prioridad',
+            'Categoría(s)',
+            'Solicitante',
+            'Técnico Asignado',
+            'Fecha Apertura',
+            'Fecha 1ª Respuesta',
+            'Fecha Resolución'
+        ];
     }
 
     public function map($ticket): array
     {
+        $cats = $ticket->categorias && $ticket->categorias->count() > 0
+            ? $ticket->categorias->pluck('nombre')->join(', ')
+            : ($ticket->category->nombre ?? $ticket->category->name ?? 'General');
+
         return [
             $ticket->id,
-            $ticket->title,
-            $ticket->status,
-            $ticket->priority,
-            $ticket->category->name ?? 'N/A',
-            $ticket->assignee->email ?? 'Sin Asignar',
-            $ticket->created_at->format('Y-m-d H:i:s'),
-            $ticket->resolved_at ? $ticket->resolved_at->format('Y-m-d H:i:s') : 'N/A',
+            $ticket->codigo,
+            $ticket->asunto ?? $ticket->title,
+            $ticket->estado,
+            strtoupper($ticket->priority),
+            $cats,
+            $ticket->creator?->name ?? 'Solicitante Moodle',
+            $ticket->assignee?->name ?? 'Sin Asignar',
+            $ticket->fecha_creacion ? $ticket->fecha_creacion->format('Y-m-d H:i:s') : '—',
+            $ticket->fecha_respuesta ? $ticket->fecha_respuesta->format('Y-m-d H:i:s') : '—',
+            $ticket->fecha_resuelto ? $ticket->fecha_resuelto->format('Y-m-d H:i:s') : '—',
         ];
     }
 }
