@@ -15,6 +15,7 @@ class Configuracion extends Model
     public const UPDATED_AT = 'fecha_actualizacion';
 
     protected $fillable = [
+        'usuario_id',
         'clave',
         'valor',
         'tipo',
@@ -26,6 +27,14 @@ class Configuracion extends Model
         'fecha_creacion'      => 'datetime',
         'fecha_actualizacion' => 'datetime',
     ];
+
+    /**
+     * Usuario Administrador (Director) responsable de la configuración.
+     */
+    public function usuario()
+    {
+        return $this->belongsTo(User::class, 'usuario_id');
+    }
 
     /**
      * Obtiene el valor casteado de una configuración según su tipo.

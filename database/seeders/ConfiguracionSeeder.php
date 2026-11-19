@@ -151,7 +151,10 @@ class ConfiguracionSeeder extends Seeder
             ],
         ];
 
+        $adminId = \App\Models\User::where('id', 1)->value('id') ?? 1;
+
         foreach ($configs as $cfg) {
+            $cfg['usuario_id'] = $adminId;
             Configuracion::firstOrCreate(
                 ['clave' => $cfg['clave']],
                 $cfg

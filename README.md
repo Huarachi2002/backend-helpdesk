@@ -1,64 +1,117 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400"></a></p>
+# Helpdesk UAGRM - Backend API (Laravel)
 
-<p align="center">
-<a href="https://travis-ci.org/laravel/framework"><img src="https://travis-ci.org/laravel/framework.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+API RESTful y lógica de negocio para la plataforma de Mesa de Ayuda y Soporte Técnico del Campus Virtual (UAGRM). Desarrollado con **Laravel 8**, **PostgreSQL** y autenticación por tokens vía **Laravel Sanctum**.
 
-## About Laravel
+---
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## 📋 Requisitos Previos
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+Asegúrate de contar con las siguientes herramientas instaladas en tu entorno de desarrollo:
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+* **PHP** >= 8.0 (con extensiones habilitadas: `pdo`, `pdo_pgsql`, `mbstring`, `openssl`, `bcmath`, `curl`, `json`)
+* **Composer** >= 2.0
+* **PostgreSQL** >= 13 (puerto por defecto: `5432`)
+* Servidor local o gestor de base de datos (pgAdmin, DBeaver o CLI `psql`)
 
-## Learning Laravel
+---
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+## 🚀 Guía Paso a Paso para Levantar el Backend
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains over 1500 video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+### 1. Ubicarse en el directorio del Backend
+Abre una terminal y navega hasta la carpeta del proyecto:
+```bash
+cd backend-helpdesk
+```
 
-## Laravel Sponsors
+### 2. Instalar dependencias de Composer
+Ejecuta la instalación de paquetes de PHP:
+```bash
+composer install
+```
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the Laravel [Patreon page](https://patreon.com/taylorotwell).
+### 3. Configurar las Variables de Entorno (`.env`)
+Si no existe el archivo `.env`, créalo a partir de la plantilla:
+```bash
+cp .env.example .env
+```
+*(En Windows PowerShell: `Copy-Item .env.example .env`)*
 
-### Premium Partners
+Genera la clave de cifrado de la aplicación:
+```bash
+php artisan key:generate
+```
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Cubet Techno Labs](https://cubettech.com)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[Many](https://www.many.co.uk)**
-- **[Webdock, Fast VPS Hosting](https://www.webdock.io/en)**
-- **[DevSquad](https://devsquad.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[OP.GG](https://op.gg)**
-- **[WebReinvent](https://webreinvent.com/?utm_source=laravel&utm_medium=github&utm_campaign=patreon-sponsors)**
-- **[Lendio](https://lendio.com)**
+Asegúrate de configurar la conexión a PostgreSQL en tu `.env`:
+```ini
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_DATABASE=helpdesk_db
+DB_USERNAME=postgres
+DB_PASSWORD=tu_password_aqui
+```
 
-## Contributing
+> [!NOTE]
+> Crea previamente la base de datos `helpdesk_db` en tu servidor PostgreSQL antes de ejecutar las migraciones.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+### 4. Ejecutar Migraciones y Poblado de Datos (Seeders)
+Ejecuta las migraciones de base de datos y genera los usuarios, roles, prioridades SLA, categorías y tickets de prueba:
+```bash
+php artisan migrate --seed
+```
 
-## Code of Conduct
+O si deseas ejecutar los seeders individualmente:
+```bash
+php artisan db:seed
+```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+### 5. Iniciar el Servidor de Desarrollo
+Inicia el servidor local de Laravel:
+```bash
+php artisan serve
+```
+Por defecto, la API estará disponible y respondiendo en:  
+👉 **`http://127.0.0.1:8000`** (o `http://localhost:8000`)
 
-## Security Vulnerabilities
+---
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+## 👥 Cuentas de Acceso Preconfiguradas (Semillas)
 
-## License
+La base de datos incluye credenciales por defecto para realizar pruebas en todos los niveles del sistema.  
+La contraseña para todas las cuentas es: **`password`**
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+| Rol Institucional | Nombre | Correo Electrónico | Contraseña | Permisos y Alcance |
+| :--- | :--- | :--- | :---: | :--- |
+| **Director / Admin** | Admin Helpdesk | `admin@helpdesk.com` | `password` | Acceso total: Dashboard, Usuarios, Categorías, Prioridades SLAs, Políticas de Notificación, Autorización de Reasignaciones. |
+| **Técnico Soporte** | Juan Soporte | `juan@helpdesk.com` | `password` | Operaciones: Gestión de Tickets, Historial Bot IA, Reportes & KPIs, Solicitudes de Reasignación. |
+| **Técnica Soporte** | María Soporte | `maria@helpdesk.com` | `password` | Operaciones: Atención de incidencias, cambio de estados, solicitudes de derivación. |
+| **Docente** | Carlos Méndez | `carlos.mendez@moodle.com` | `password` | Solicitante: Apertura y seguimiento de incidencias docentes. |
+| **Estudiante** | Estudiante Demo | `estudiante@moodle.com` | `password` | Solicitante: Consultas y requerimientos académicos en el campus virtual. |
+
+---
+
+## 🛠️ Comandos y Procesos Adicionales
+
+* **Ejecutar proceso de recordatorios SLA (Scheduler manual)**:
+  Evalúa tickets en espera y sin respuesta para enviar alertas y generar el resumen digest diario:
+  ```bash
+  php artisan tickets:enviar-recordatorios
+  ```
+* **Limpiar memoria caché y configuración**:
+  ```bash
+  php artisan config:clear
+  php artisan cache:clear
+  php artisan route:clear
+  ```
+* **Consola Interactiva (Tinker)**:
+  ```bash
+  php artisan tinker
+  ```
+
+---
+
+## 📌 Principales Módulos del Backend
+
+* **Gestión de Tickets & SLAs**: Cálculo de horas de espera, tiempos de primera respuesta (FRT) y resolución (MTTR).
+* **Historial de Asignaciones (`ticket_asignaciones`)**: Modelo simplificado que audita la vida del ticket con una sola clave foránea hacia usuarios (`tecnico_id`), control de asignación activa (`activo: bool`) y solicitudes de traspaso (`solicitud_pendiente: bool`).
+* **Políticas Globales de Notificación**: Configuraciones centralizadas administradas por la Dirección en la tabla `configuraciones` para el despacho por correo SMTP y bandeja web in-app.

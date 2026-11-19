@@ -176,4 +176,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(BotInteraction::class, 'user_id');
     }
+
+    public function configuraciones()
+    {
+        return $this->hasMany(Configuracion::class, 'usuario_id');
+    }
 }
