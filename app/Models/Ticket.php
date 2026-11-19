@@ -229,6 +229,31 @@ class Ticket extends Model
         return $this->hasMany(TicketMensaje::class, 'ticket_id')->orderBy('fecha_creacion', 'asc');
     }
 
+    public function asignaciones()
+    {
+        return $this->hasMany(TicketAsignacion::class, 'ticket_id')->orderBy('fecha_inicio', 'desc')->orderBy('id', 'desc');
+    }
+
+    public function asignacionActiva()
+    {
+        return $this->hasOne(TicketAsignacion::class, 'ticket_id')->where('activo', true);
+    }
+
+    public function solicitudReasignacionPendiente()
+    {
+        return $this->hasOne(TicketAsignacion::class, 'ticket_id')
+            ->where('solicitud_pendiente', true)
+            ->latestOfMany('fecha_inicio');
+    }
+
+    /**
+     * Alias de compatibilidad
+     */
+    public function reasignaciones()
+    {
+        return $this->asignaciones();
+    }
+
     // --- State Pattern ---
 
     public function state(): \App\States\Ticket\TicketState

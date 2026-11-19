@@ -109,6 +109,60 @@ class TicketResource extends JsonResource
                 ])
             ),
 
+            'pending_reassignment' => $this->solicitudReasignacionPendiente ? [
+                'id'                   => $this->solicitudReasignacionPendiente->id,
+                'motivo'               => $this->solicitudReasignacionPendiente->motivo,
+                'estado'               => 'PENDIENTE',
+                'fecha_solicitud'      => ($this->solicitudReasignacionPendiente->fecha_inicio ?? $this->solicitudReasignacionPendiente->created_at)?->toDateTimeString(),
+                'solicitante'          => $this->assignee ? [
+                    'id'       => $this->assignee->id,
+                    'name'     => $this->assignee->name,
+                    'email'    => $this->assignee->email,
+                    'rol'      => $this->assignee->rol?->nombre,
+                ] : null,
+                'tecnico_propuesto'    => $this->solicitudReasignacionPendiente->tecnico ? [
+                    'id'       => $this->solicitudReasignacionPendiente->tecnico->id,
+                    'name'     => $this->solicitudReasignacionPendiente->tecnico->name,
+                    'email'    => $this->solicitudReasignacionPendiente->tecnico->email,
+                    'rol'      => $this->solicitudReasignacionPendiente->tecnico->rol?->nombre,
+                ] : null,
+                'tecnico_anterior'     => $this->assignee ? [
+                    'id'       => $this->assignee->id,
+                    'name'     => $this->assignee->name,
+                    'email'    => $this->assignee->email,
+                ] : null,
+            ] : null,
+
+            'assignment_history' => $this->whenLoaded('asignaciones', fn() =>
+                $this->asignaciones->map(fn($a) => [
+                    'id'                  => $a->id,
+                    'tecnico_id'          => $a->tecnico_id,
+                    'tecnico_name'        => $a->tecnico?->name,
+                    'activo'              => (bool) $a->activo,
+                    'solicitud_pendiente' => (bool) $a->solicitud_pendiente,
+                    'motivo'              => $a->motivo,
+                    'motivo_resolucion'   => $a->motivo_resolucion,
+                    'fecha_inicio'        => $a->fecha_inicio?->toDateTimeString(),
+                    'fecha_fin'           => $a->fecha_fin?->toDateTimeString(),
+                ])
+            ),
+
+            'reassignment_history' => $this->whenLoaded('asignaciones', fn() =>
+                $this->asignaciones->map(fn($r) => [
+                    'id'                  => $r->id,
+                    'motivo'              => $r->motivo,
+                    'estado'              => $r->activo ? 'ACTIVO' : ($r->solicitud_pendiente ? 'PENDIENTE' : 'HISTORICO'),
+                    'activo'              => (bool) $r->activo,
+                    'solicitud_pendiente' => (bool) $r->solicitud_pendiente,
+                    'motivo_resolucion'   => $r->motivo_resolucion,
+                    'fecha_solicitud'     => $r->fecha_inicio?->toDateTimeString(),
+                    'fecha_resolucion'    => $r->fecha_fin?->toDateTimeString(),
+                    'solicitante'         => $this->assignee?->name,
+                    'tecnico_propuesto'   => $r->tecnico?->name,
+                    'revisado_por'        => 'Dirección',
+                ])
+            ),
+
             'times' => [
                 'first_response_at' => $this->first_response_at?->toDateTimeString(),
                 'resolved_at'       => $this->resolved_at?->toDateTimeString(),

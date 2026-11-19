@@ -3,6 +3,9 @@
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BotInteractionController;
 use App\Http\Controllers\CategoryController;
+use App\Http\Controllers\ConfigurationController;
+use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\PriorityController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\TicketController;
 use App\Http\Controllers\UserController;
@@ -31,13 +34,19 @@ Route::middleware('auth:sanctum')->group(function () {
     // Categorías de Tickets
     Route::get('/categories', [CategoryController::class, 'index']);
 
+    // Prioridades y SLAs de Tickets
+    Route::get('/priorities', [PriorityController::class, 'index']);
+
     // Tickets
     Route::get('/tickets', [TicketController::class, 'index']);
     Route::post('/tickets', [TicketController::class, 'store']);
+    Route::get('/tickets/reassignments/pending', [TicketController::class, 'pendingReassignments']);
     Route::get('/tickets/{id}', [TicketController::class, 'show']);
     Route::get('/tickets/{id}/eligible-agents', [TicketController::class, 'eligibleAgents']);
     Route::patch('/tickets/{id}/status', [TicketController::class, 'updateStatus']);
     Route::patch('/tickets/{id}/assign', [TicketController::class, 'reassign']);
+    Route::post('/tickets/{id}/reassignments/{requestId}/approve', [TicketController::class, 'approveReassignment']);
+    Route::post('/tickets/{id}/reassignments/{requestId}/reject', [TicketController::class, 'rejectReassignment']);
 
     // Auditoria de Interacciones (Bot)
     Route::get('/bot-interactions', [BotInteractionController::class, 'index']);
@@ -49,8 +58,20 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/times', [ReportController::class, 'times']);
     Route::get('/reports/export', [ReportController::class, 'export']);
 
+    // Notificaciones (Bandeja In-App del Usuario)
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
+    Route::patch('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
+    Route::patch('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
+    Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
+
     // Gestión de Usuarios y Roles de Agente (Exclusivo Administrador)
     Route::middleware('admin')->group(function () {
+        // Configuraciones del Sistema y Notificaciones (CRUD Admin)
+        Route::get('/configurations', [ConfigurationController::class, 'index']);
+        Route::put('/configurations', [ConfigurationController::class, 'update']);
+        Route::post('/configurations/trigger-reminders', [ConfigurationController::class, 'triggerReminders']);
+
         Route::get('/users', [UserController::class, 'index']);
         Route::post('/users', [UserController::class, 'store']);
         Route::get('/users/{id}', [UserController::class, 'show']);
@@ -64,5 +85,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/categories/{id}', [CategoryController::class, 'update']);
         Route::patch('/categories/{id}/toggle-active', [CategoryController::class, 'toggleActive']);
         Route::delete('/categories/{id}', [CategoryController::class, 'destroy']);
+
+        // Gestión de Prioridades y SLAs (CRUD Admin)
+        Route::post('/priorities', [PriorityController::class, 'store']);
+        Route::get('/priorities/{id}', [PriorityController::class, 'show']);
+        Route::put('/priorities/{id}', [PriorityController::class, 'update']);
+        Route::patch('/priorities/{id}/toggle-active', [PriorityController::class, 'toggleActive']);
+        Route::delete('/priorities/{id}', [PriorityController::class, 'destroy']);
     });
 });

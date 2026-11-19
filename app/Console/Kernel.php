@@ -15,7 +15,8 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule)
     {
-        // $schedule->command('inspire')->hourly();
+        // Ejecución diaria a las 08:00 para enviar recordatorios de tickets pendientes
+        $schedule->command('tickets:enviar-recordatorios')->dailyAt('08:00');
     }
 
     /**
