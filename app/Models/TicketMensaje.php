@@ -25,6 +25,10 @@ class TicketMensaje extends Model
         'correo_message_id',
     ];
 
+    protected $casts = [
+        'fecha_creacion' => 'datetime',
+    ];
+
     public function ticket()
     {
         return $this->belongsTo(Ticket::class, 'ticket_id');

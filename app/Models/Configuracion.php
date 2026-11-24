@@ -117,6 +117,7 @@ class Configuracion extends Model
             'REASIGNACION_RECHAZADA'     => 'reasignacion',
             'RECORDATORIO_PENDIENTE'     => 'recordatorio',
             'TICKET_SIN_RESPUESTA'       => 'sin_respuesta',
+            'RESPUESTA_TICKET'           => 'respuesta_ticket',
         ];
 
         $normalizedChannel = ($channel === 'in_app' || $channel === 'inapp') ? 'inapp' : 'email';

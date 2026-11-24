@@ -20,6 +20,8 @@ class OpenState extends TicketState
     {
         return [
             self::STATUS_IN_PROGRESS,
+            // Primera respuesta del soporte: el ticket pasa a esperar al cliente.
+            self::STATUS_WAITING,
         ];
     }
 }

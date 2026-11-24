@@ -2,19 +2,30 @@
 
 namespace App\Services;
 
+use App\Contracts\Mail\MailSender;
 use App\Models\Configuracion;
 use App\Models\Ticket;
 use App\Models\TicketAsignacion;
 use App\Models\User;
+use App\Services\Mail\OutgoingMail;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 
 class MailService
 {
     /**
+     * Servidor de correo inyectado (Gmail, SMTP propio, Log...). Ver MailServiceProvider.
+     */
+    protected MailSender $sender;
+
+    public function __construct(MailSender $sender)
+    {
+        $this->sender = $sender;
+    }
+
+    /**
      * URL base de la aplicación Frontend para los botones de acción.
      */
-    protected function getFrontendUrl(): string
+    public function getFrontendUrl(): string
     {
         return env('FRONTEND_URL', 'http://localhost:5173');
     }
@@ -22,7 +33,7 @@ class MailService
     /**
      * Obtiene el remitente configurado dinámicamente o por variables de entorno.
      */
-    protected function getSender(): array
+    public function getSender(): array
     {
         $address = Configuracion::get('correo_remitente_direccion', config('mail.from.address') ?: 'soporte@uagrm.edu.bo');
         $name = Configuracion::get('correo_remitente_nombre', config('mail.from.name') ?: 'Mesa de Ayuda UAGRM');
@@ -250,17 +261,24 @@ class MailService
     }
 
     /**
-     * Envío seguro con manejo de excepciones y log.
+     * Envío seguro: renderiza la vista Blade y delega el envío al MailSender inyectado.
      */
     protected function sendMailSafe(string $view, array $data, string $toEmail, string $toName, string $subject, array $sender): bool
     {
         try {
-            Mail::send($view, $data, function ($message) use ($toEmail, $toName, $subject, $sender) {
-                $message->from($sender['address'], $sender['name']);
-                $message->to($toEmail, $toName);
-                $message->subject($subject);
-            });
-            return true;
+            $mail = OutgoingMail::make()
+                ->from($sender['address'], $sender['name'])
+                ->to($toEmail, $toName)
+                ->subject($subject)
+                ->html(view($view, $data)->render());
+
+            $result = $this->sender->send($mail);
+
+            if (!$result->success) {
+                Log::warning("No se pudo enviar correo a {$toEmail} ({$subject}) vía {$result->driver}: {$result->error}");
+            }
+
+            return $result->success;
         } catch (\Throwable $e) {
             Log::warning("No se pudo enviar correo a {$toEmail} ({$subject}): " . $e->getMessage());
             return false;

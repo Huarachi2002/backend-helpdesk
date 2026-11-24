@@ -24,5 +24,13 @@ class WaitingState extends TicketState
             self::STATUS_CLOSED,
         ];
     }
+
+    public function applyAttributes(): void
+    {
+        // Si el soporte responde directamente desde "Abierto", esa es la primera respuesta.
+        if (is_null($this->ticket->first_response_at)) {
+            $this->ticket->first_response_at = now();
+        }
+    }
 }
 

@@ -55,25 +55,35 @@ class TicketResource extends JsonResource
                 'sla_horas_resolucion' => $this->prioridad->sla_horas_resolucion,
             ] : null),
 
-            'assigned_to' => $this->whenLoaded('assignee', fn() => $this->assignee ? [
-                'id'       => $this->assignee->id,
-                'name'     => $this->assignee->name,
-                'nombre'   => $this->assignee->nombre,
-                'apellido' => $this->assignee->apellido,
-                'email'    => $this->assignee->email,
-                'correo'   => $this->assignee->correo,
-                'rol'      => $this->assignee->rol?->nombre,
-            ] : null),
+            'assigned_to' => $this->whenLoaded('assignee', function () {
+                if (!$this->assignee) return null;
+                $metrics = app(\App\Services\TicketAssignmentService::class)->getAgentMetricsForTicket($this->assignee, $this->resource);
+                return [
+                    'id'                  => $this->assignee->id,
+                    'name'                => $this->assignee->name,
+                    'nombre'              => $this->assignee->nombre,
+                    'apellido'            => $this->assignee->apellido,
+                    'email'               => $this->assignee->email,
+                    'correo'              => $this->assignee->correo,
+                    'rol'                 => $this->assignee->rol?->nombre,
+                    'asignacion_metricas' => $metrics,
+                ];
+            }),
 
-            'tecnico_asignado' => $this->whenLoaded('assignee', fn() => $this->assignee ? [
-                'id'       => $this->assignee->id,
-                'name'     => $this->assignee->name,
-                'nombre'   => $this->assignee->nombre,
-                'apellido' => $this->assignee->apellido,
-                'email'    => $this->assignee->email,
-                'correo'   => $this->assignee->correo,
-                'rol'      => $this->assignee->rol?->nombre,
-            ] : null),
+            'tecnico_asignado' => $this->whenLoaded('assignee', function () {
+                if (!$this->assignee) return null;
+                $metrics = app(\App\Services\TicketAssignmentService::class)->getAgentMetricsForTicket($this->assignee, $this->resource);
+                return [
+                    'id'                  => $this->assignee->id,
+                    'name'                => $this->assignee->name,
+                    'nombre'              => $this->assignee->nombre,
+                    'apellido'            => $this->assignee->apellido,
+                    'email'               => $this->assignee->email,
+                    'correo'              => $this->assignee->correo,
+                    'rol'                 => $this->assignee->rol?->nombre,
+                    'asignacion_metricas' => $metrics,
+                ];
+            }),
 
             'created_by' => $this->whenLoaded('creator', fn() => $this->creator ? [
                 'id'             => $this->creator->id,
@@ -107,6 +117,10 @@ class TicketResource extends JsonResource
                     'changer_role' => $h->changer ? $h->changer->role : null,
                     'changed_at'   => $h->created_at->toDateTimeString(),
                 ])
+            ),
+
+            'mensajes' => $this->whenLoaded('mensajes', fn() =>
+                TicketMessageResource::collection($this->mensajes)
             ),
 
             'pending_reassignment' => $this->solicitudReasignacionPendiente ? [

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BotInteractionController;
 use App\Http\Controllers\CategoryController;
@@ -7,7 +8,9 @@ use App\Http\Controllers\ConfigurationController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PriorityController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\SearchController;
 use App\Http\Controllers\TicketController;
+use App\Http\Controllers\TicketMessageController;
 use App\Http\Controllers\UserController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -25,11 +28,14 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
 
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', 'log.access'])->group(function () {
     
     // Auth
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
+
+    // Búsqueda Global
+    Route::get('/search', [SearchController::class, 'search']);
 
     // Categorías de Tickets
     Route::get('/categories', [CategoryController::class, 'index']);
@@ -44,6 +50,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/tickets/{id}', [TicketController::class, 'show']);
     Route::get('/tickets/{id}/eligible-agents', [TicketController::class, 'eligibleAgents']);
     Route::patch('/tickets/{id}/status', [TicketController::class, 'updateStatus']);
+    Route::get('/tickets/{id}/messages', [TicketMessageController::class, 'index']);
+    Route::post('/tickets/{id}/messages', [TicketMessageController::class, 'store']);
     Route::patch('/tickets/{id}/assign', [TicketController::class, 'reassign']);
     Route::post('/tickets/{id}/reassignments/{requestId}/approve', [TicketController::class, 'approveReassignment']);
     Route::post('/tickets/{id}/reassignments/{requestId}/reject', [TicketController::class, 'rejectReassignment']);
@@ -57,6 +65,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/impact', [ReportController::class, 'impact']);
     Route::get('/reports/times', [ReportController::class, 'times']);
     Route::get('/reports/export', [ReportController::class, 'export']);
+    Route::get('/reports/dashboard', [ReportController::class, 'dashboard']);
 
     // Notificaciones (Bandeja In-App del Usuario)
     Route::get('/notifications', [NotificationController::class, 'index']);
@@ -92,5 +101,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/priorities/{id}', [PriorityController::class, 'update']);
         Route::patch('/priorities/{id}/toggle-active', [PriorityController::class, 'toggleActive']);
         Route::delete('/priorities/{id}', [PriorityController::class, 'destroy']);
+
+        // Bitácora de Auditoría
+        Route::get('/audit-logs', [AuditLogController::class, 'index']);
+        Route::get('/audit-logs/stats', [AuditLogController::class, 'stats']);
     });
 });

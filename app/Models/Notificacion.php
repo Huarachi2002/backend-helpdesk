@@ -41,6 +41,7 @@ class Notificacion extends Model
     public const TIPO_REASIGNACION_APROBADA  = 'REASIGNACION_APROBADA';
     public const TIPO_REASIGNACION_RECHAZADA = 'REASIGNACION_RECHAZADA';
     public const TIPO_TICKET_SIN_RESPUESTA   = 'TICKET_SIN_RESPUESTA';
+    public const TIPO_RESPUESTA_TICKET       = 'RESPUESTA_TICKET';
 
     public function usuario()
     {

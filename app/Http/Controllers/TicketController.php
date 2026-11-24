@@ -52,19 +52,26 @@ class TicketController extends Controller
 
             $agent = $assignmentService->assign($ticket);
 
+            $rationale = $agent?->assignment_rationale ?? null;
+            $motivo = $agent
+                ? ($rationale ? "Asignación automática multi-criterio: " . $rationale['summary'] : 'Asignación técnica automática al crear el ticket.')
+                : 'Ticket derivado a la cola general (sin técnicos disponibles).';
+
             if ($agent) {
                 TicketAsignacion::create([
                     'ticket_id'           => $ticket->id,
                     'tecnico_id'          => $agent->id,
                     'activo'              => true,
                     'solicitud_pendiente' => false,
-                    'motivo'              => 'Asignación técnica automática al crear el ticket.',
+                    'motivo'              => $motivo,
                     'fecha_inicio'        => now(),
                 ]);
             }
 
             $comments = $agent
-                ? "Ticket asignado automáticamente a {$agent->email}."
+                ? ($rationale
+                    ? "Ticket asignado automáticamente a {$agent->name} ({$agent->email}). " . $rationale['summary']
+                    : "Ticket asignado automáticamente a {$agent->email}.")
                 : "Ticket derivado a la cola general (sin técnicos disponibles).";
 
             TicketHistory::create([
@@ -167,6 +174,7 @@ class TicketController extends Controller
             'history.changer.rol',
             'solicitudReasignacionPendiente.tecnico.rol',
             'asignaciones.tecnico.rol',
+            'mensajes.usuario.rol',
         ])->findOrFail($id);
 
         return new TicketResource($ticket);
@@ -218,32 +226,37 @@ class TicketController extends Controller
     }
 
     /**
-     * Lista todos los técnicos que cumplen con la prioridad y categoría del ticket.
+     * Lista todos los técnicos que cumplen con la prioridad y categoría del ticket,
+     * ordenados por su índice de idoneidad multi-criterio.
      */
     public function eligibleAgents($id, TicketAssignmentService $assignmentService)
     {
         $ticket = Ticket::with(['categorias', 'prioridad'])->findOrFail($id);
-        $eligible = $assignmentService->getEligibleAgents($ticket);
+        $eligible = $assignmentService->getEligibleAgentsWithScores($ticket);
 
         $data = $eligible->map(function ($agent) use ($ticket) {
             return [
-                'id'                  => $agent->id,
-                'name'                => $agent->name,
-                'nombre'              => $agent->nombre,
-                'apellido'            => $agent->apellido,
-                'email'               => $agent->email,
-                'correo'              => $agent->correo,
-                'role'                => $agent->role,
-                'department'          => $agent->department,
-                'tier_level'          => 2,
-                'max_active_tickets'  => 10,
+                'id'                     => $agent->id,
+                'name'                   => $agent->name,
+                'nombre'                 => $agent->nombre,
+                'apellido'               => $agent->apellido,
+                'email'                  => $agent->email,
+                'correo'                 => $agent->correo,
+                'role'                   => $agent->role,
+                'department'             => $agent->department,
+                'tier_level'             => 2,
+                'max_active_tickets'     => 10,
                 'assigned_tickets_count' => $agent->assigned_tickets_count,
-                'is_current_assignee' => ($agent->id === $ticket->tecnico_asignado_id),
-                'allowed_priorities'  => $agent->prioridades->pluck('codigo')->map(fn($c) => strtolower($c))->toArray(),
-                'categories'          => $agent->categorias->map(fn($c) => [
+                'is_current_assignee'    => ($agent->id === $ticket->tecnico_asignado_id),
+                'allowed_priorities'     => $agent->prioridades->pluck('codigo')->map(fn($c) => strtolower($c))->toArray(),
+                'categories'             => $agent->categorias->map(fn($c) => [
                     'id'   => $c->id,
                     'name' => $c->nombre,
                 ]),
+                // Indicadores de scoring multi-criterio
+                'assignment_score'       => $agent->assignment_score ?? null,
+                'score_breakdown'        => $agent->assignment_breakdown ?? null,
+                'raw_metrics'            => $agent->assignment_raw ?? null,
             ];
         });
 

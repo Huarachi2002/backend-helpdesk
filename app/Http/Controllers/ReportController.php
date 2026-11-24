@@ -106,4 +106,45 @@ class ReportController extends Controller
 
         return Excel::download(new TicketExport, 'tickets_report.xlsx');
     }
+
+    public function dashboard(Request $request)
+    {
+        $cacheKey = 'reports_dashboard_' . md5(json_encode($request->all()));
+
+        return Cache::remember($cacheKey, 1800, function () {
+            // Tickets por estado
+            $porEstado = Ticket::select('estado', DB::raw('count(*) as total'))
+                ->groupBy('estado')
+                ->get();
+
+            // FRT y MTTR por mes (últimos 6 meses)
+            $timesPerMonth = Ticket::select(
+                DB::raw("TO_CHAR(fecha_creacion, 'YYYY-MM') as mes"),
+                DB::raw('COUNT(*) as total_tickets'),
+                DB::raw('ROUND(CAST(AVG(EXTRACT(EPOCH FROM (fecha_respuesta - fecha_creacion))/3600) AS numeric), 2) as frt_promedio_horas'),
+                DB::raw('ROUND(CAST(AVG(EXTRACT(EPOCH FROM (fecha_resuelto - fecha_creacion))/3600) AS numeric), 2) as mttr_promedio_horas'),
+                DB::raw('COUNT(fecha_resuelto) as tickets_resueltos')
+            )
+            ->where('fecha_creacion', '>=', now()->subMonths(6))
+            ->groupBy('mes')
+            ->orderBy('mes')
+            ->get();
+
+            // FRT y MTTR globales (totales)
+            $tiemposGlobales = Ticket::select(
+                DB::raw('COUNT(*) as n'),
+                DB::raw('AVG(EXTRACT(EPOCH FROM (fecha_respuesta - fecha_creacion))/3600) as frt_promedio_horas'),
+                DB::raw('AVG(EXTRACT(EPOCH FROM (fecha_resuelto - fecha_creacion))/3600) as mttr_promedio_horas'),
+                DB::raw('COUNT(fecha_respuesta) as tickets_con_respuesta'),
+                DB::raw('COUNT(fecha_resuelto) as tickets_resueltos')
+            )
+            ->first();
+
+            return response()->json([
+                'por_estado'        => $porEstado,
+                'tiempos_por_mes'   => $timesPerMonth,
+                'tiempos_globales'  => $tiemposGlobales,
+            ]);
+        });
+    }
 }

@@ -142,7 +142,7 @@
         </div>
 
         <div class="footer">
-            <p>Este es un correo automático generado por el Sistema de Mesa de Ayuda. Por favor, no responda directamente a este correo.</p>
+            <p>@yield('footer_note', 'Este es un correo automático generado por el Sistema de Mesa de Ayuda. Por favor, no responda directamente a este correo.')</p>
             <p>&copy; {{ date('Y') }} Mesa de Ayuda UAGRM. Todos los derechos reservados.</p>
         </div>
     </div>
