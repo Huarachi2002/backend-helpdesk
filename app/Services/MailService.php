@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Contracts\Mail\MailReceiver;
 use App\Contracts\Mail\MailSender;
 use App\Models\Configuracion;
 use App\Models\Ticket;
@@ -17,9 +18,16 @@ class MailService
      */
     protected MailSender $sender;
 
-    public function __construct(MailSender $sender)
+    /**
+     * Buzón de recepción (si está activo, las respuestas a cualquier correo
+     * del sistema llegan ahí y se registran en el ticket).
+     */
+    protected MailReceiver $receiver;
+
+    public function __construct(MailSender $sender, MailReceiver $receiver)
     {
         $this->sender = $sender;
+        $this->receiver = $receiver;
     }
 
     /**
@@ -271,6 +279,10 @@ class MailService
                 ->to($toEmail, $toName)
                 ->subject($subject)
                 ->html(view($view, $data)->render());
+
+            if ($inbox = $this->receiver->mailboxAddress()) {
+                $mail->replyTo($inbox, $sender['name']);
+            }
 
             $result = $this->sender->send($mail);
 

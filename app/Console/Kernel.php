@@ -17,6 +17,12 @@ class Kernel extends ConsoleKernel
     {
         // Ejecución diaria a las 08:00 para enviar recordatorios de tickets pendientes
         $schedule->command('tickets:enviar-recordatorios')->dailyAt('08:00');
+
+        // Cada minuto: registra en los tickets las respuestas recibidas por correo.
+        $schedule->command('tickets:procesar-correos')
+            ->everyMinute()
+            ->withoutOverlapping(10)
+            ->when(fn () => config('helpdesk_mail.inbound.driver', 'none') !== 'none');
     }
 
     /**

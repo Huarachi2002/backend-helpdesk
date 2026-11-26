@@ -33,10 +33,13 @@
             </span>
         </div>
     </div>
-
-    <div class="btn-wrapper">
-        <a href="{{ $actionUrl }}" class="btn" target="_blank">Ver y responder en el sistema</a>
-    </div>
 @endsection
 
 @section('footer_note')
+    @if(!empty($replyByEmail))
+        Puedes responder directamente a este correo: tu respuesta se agregará al ticket {{ $ticket->codigo }}.
+        Escribe encima del mensaje citado y no cambies el asunto.
+    @else
+        Este es un correo automático generado por el Sistema de Mesa de Ayuda. Para responder, ingresa al sistema con el botón de arriba.
+    @endif
+@endsection

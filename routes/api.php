@@ -60,12 +60,18 @@ Route::middleware(['auth:sanctum', 'log.access'])->group(function () {
     Route::get('/bot-interactions', [BotInteractionController::class, 'index']);
     Route::post('/bot-interactions', [BotInteractionController::class, 'store']);
 
-    // Reportes
-    Route::get('/reports/volume', [ReportController::class, 'volume']);
-    Route::get('/reports/impact', [ReportController::class, 'impact']);
-    Route::get('/reports/times', [ReportController::class, 'times']);
-    Route::get('/reports/export', [ReportController::class, 'export']);
-    Route::get('/reports/dashboard', [ReportController::class, 'dashboard']);
+    // Reportes (Acceso general para Administrador y Técnico de Soporte)
+    Route::middleware('staff')->group(function () {
+        Route::get('/reports/volume', [ReportController::class, 'volume']);
+        Route::get('/reports/impact', [ReportController::class, 'impact']);
+        Route::get('/reports/times', [ReportController::class, 'times']);
+        Route::get('/reports/export', [ReportController::class, 'export']);
+
+        // Reporte de Métricas FRT / MTTR por rango de fechas, técnico y categoría
+        Route::get('/reports/metrics', [ReportController::class, 'metrics']);
+        Route::get('/reports/metrics/options', [ReportController::class, 'metricsOptions']);
+        Route::get('/reports/metrics/export', [ReportController::class, 'metricsExport']);
+    });
 
     // Notificaciones (Bandeja In-App del Usuario)
     Route::get('/notifications', [NotificationController::class, 'index']);
@@ -101,6 +107,9 @@ Route::middleware(['auth:sanctum', 'log.access'])->group(function () {
         Route::put('/priorities/{id}', [PriorityController::class, 'update']);
         Route::patch('/priorities/{id}/toggle-active', [PriorityController::class, 'toggleActive']);
         Route::delete('/priorities/{id}', [PriorityController::class, 'destroy']);
+
+        // Dashboard General (Exclusivo Administrador)
+        Route::get('/reports/dashboard', [ReportController::class, 'dashboard']);
 
         // Bitácora de Auditoría
         Route::get('/audit-logs', [AuditLogController::class, 'index']);

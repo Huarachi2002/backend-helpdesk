@@ -76,6 +76,9 @@ return [
             'prefix_indexes' => true,
             'schema' => 'public',
             'sslmode' => 'prefer',
+            // Cada conexión hace "SET TIME ZONE" con la misma zona de la app, así las
+            // fechas se guardan y leen bien aunque el servidor PostgreSQL esté en UTC.
+            'timezone' => env('DB_TIMEZONE', env('APP_TIMEZONE', 'America/La_Paz')),
         ],
 
         'sqlsrv' => [

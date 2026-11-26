@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Contracts\Mail\MailReceiver;
 use App\Contracts\Mail\MailSender;
 use App\Exceptions\TicketReplyException;
 use App\Models\Notificacion;
@@ -35,12 +36,18 @@ class TicketReplyService
     protected MailSender $mailSender;
     protected MailService $mailService;
     protected NotificationService $notifications;
+    protected MailReceiver $mailReceiver;
 
-    public function __construct(MailSender $mailSender, MailService $mailService, NotificationService $notifications)
-    {
+    public function __construct(
+        MailSender $mailSender,
+        MailService $mailService,
+        NotificationService $notifications,
+        MailReceiver $mailReceiver
+    ) {
         $this->mailSender = $mailSender;
         $this->mailService = $mailService;
         $this->notifications = $notifications;
+        $this->mailReceiver = $mailReceiver;
     }
 
     /**
@@ -49,8 +56,14 @@ class TicketReplyService
      * @throws TicketReplyException
      * @throws \App\Exceptions\InvalidStateTransitionException
      */
-    public function reply(Ticket $ticket, User $author, string $body, ?string $requestedStatus = null): array
-    {
+    public function reply(
+        Ticket $ticket,
+        User $author,
+        string $body,
+        ?string $requestedStatus = null,
+        string $canal = self::CANAL_WEB,
+        ?string $incomingMessageId = null
+    ): array {
         $ticket->loadMissing(['creator', 'assignee']);
         $author->loadMissing('rol');
 
@@ -68,20 +81,22 @@ class TicketReplyService
             $targetStatus = null;
         }
 
-        $mensaje = DB::transaction(function () use ($ticket, $author, $body, $emisor, $targetStatus) {
+        $mensaje = DB::transaction(function () use ($ticket, $author, $body, $emisor, $targetStatus, $canal, $incomingMessageId) {
             $mensaje = TicketMensaje::create([
-                'ticket_id'        => $ticket->id,
-                'usuario_id'       => $author->id,
-                'tipo_emisor'      => $emisor,
-                'canal_origen'     => self::CANAL_WEB,
-                'remitente_email'  => $author->correo ?? '',
-                'remitente_nombre' => $author->name,
-                'cuerpo_mensaje'   => $body,
+                'ticket_id'         => $ticket->id,
+                'usuario_id'        => $author->id,
+                'tipo_emisor'       => $emisor,
+                'canal_origen'      => $canal,
+                'remitente_email'   => $author->correo ?? '',
+                'remitente_nombre'  => $author->name,
+                'cuerpo_mensaje'    => $body,
+                // Respuesta recibida por correo: se guarda su Message-ID (hilo + deduplicación).
+                'correo_message_id' => $canal === self::CANAL_EMAIL ? $incomingMessageId : null,
             ]);
 
             if ($targetStatus) {
                 // Lanza InvalidStateTransitionException si no es válida → rollback del mensaje.
-                $ticket->transitionTo($targetStatus, $author, $this->historyComment($author, $emisor, $targetStatus));
+                $ticket->transitionTo($targetStatus, $author, $this->historyComment($author, $emisor, $targetStatus, $canal));
             } else {
                 // Sin cambio de estado: igual se marca la actividad del ticket.
                 $ticket->touch();
@@ -161,12 +176,13 @@ class TicketReplyService
         }
     }
 
-    protected function historyComment(User $author, string $emisor, string $targetStatus): string
+    protected function historyComment(User $author, string $emisor, string $targetStatus, string $canal = self::CANAL_WEB): string
     {
         $who = $emisor === self::EMISOR_SOPORTE ? 'Soporte' : 'Solicitante';
+        $via = $canal === self::CANAL_EMAIL ? ' por correo' : '';
         $label = \App\States\Ticket\TicketStateFactory::makeByKey($targetStatus, new Ticket())->label();
 
-        return "Respuesta registrada por {$who} ({$author->name}). Estado actualizado automáticamente a '{$label}'.";
+        return "Respuesta registrada{$via} por {$who} ({$author->name}). Estado actualizado automáticamente a '{$label}'.";
     }
 
     /**
@@ -189,6 +205,11 @@ class TicketReplyService
                 ->pluck('correo_message_id')
                 ->all();
 
+            // Si la respuesta llegó por correo, el reenvío a la contraparte responde a ese correo.
+            if ($mensaje->canal_origen === self::CANAL_EMAIL && $mensaje->correo_message_id) {
+                $previousIds[] = $mensaje->correo_message_id;
+            }
+
             $references = array_merge(array_filter([$ticket->correo_hilo]), $previousIds);
             $inReplyTo = end($previousIds) ?: $ticket->correo_hilo;
 
@@ -202,6 +223,7 @@ class TicketReplyService
                 'statusLabel'   => $ticket->state()->label(),
                 'cuerpo'        => $mensaje->cuerpo_mensaje,
                 'actionUrl'     => $this->mailService->getFrontendUrl() . '/tickets/' . $ticket->id,
+                'replyByEmail'  => $this->mailReceiver->mailboxAddress() !== null,
             ];
 
             $mail = OutgoingMail::make()
@@ -213,6 +235,11 @@ class TicketReplyService
                 ->inReplyTo($inReplyTo ?: null)
                 ->references($references);
 
+            // Con la recepción activa, las respuestas deben llegar al buzón que lee el sistema.
+            if ($inbox = $this->mailReceiver->mailboxAddress()) {
+                $mail->replyTo($inbox, $sender['name']);
+            }
+
             $result = $this->mailSender->send($mail);
         } catch (\Throwable $e) {
             Log::warning("Error al preparar el correo de respuesta del ticket {$ticket->codigo}: " . $e->getMessage());
@@ -220,8 +247,11 @@ class TicketReplyService
         }
 
         if ($result->success && $result->messageId) {
-            $mensaje->correo_message_id = $result->messageId;
-            $mensaje->save();
+            // Un mensaje recibido por correo conserva su propio Message-ID.
+            if (empty($mensaje->correo_message_id)) {
+                $mensaje->correo_message_id = $result->messageId;
+                $mensaje->save();
+            }
 
             if (empty($ticket->correo_hilo)) {
                 $ticket->correo_hilo = $result->messageId;

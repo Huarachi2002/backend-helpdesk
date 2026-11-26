@@ -16,7 +16,10 @@ class TicketMessageResource extends JsonResource
             'remitente_nombre'   => $this->remitente_nombre,
             'remitente_email'    => $this->remitente_email,
             'cuerpo_mensaje'     => $this->cuerpo_mensaje,
-            'enviado_por_correo' => !empty($this->correo_message_id),
+            // Respuesta escrita en la web que salió por correo a la contraparte.
+            'enviado_por_correo' => $this->canal_origen !== 'EMAIL' && !empty($this->correo_message_id),
+            // Respuesta que el usuario envió desde su bandeja de correo.
+            'recibido_por_correo' => $this->canal_origen === 'EMAIL',
             'usuario'            => $this->whenLoaded('usuario', fn () => $this->usuario ? [
                 'id'   => $this->usuario->id,
                 'name' => $this->usuario->name,

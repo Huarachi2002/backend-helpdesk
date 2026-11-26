@@ -107,7 +107,10 @@ La contraseña para todas las cuentas es: **`password`**
   ```bash
   php artisan tinker
   ```
-
+* **Ejecutar scheduler**:
+  ```bash
+  php artisan schedule:work
+  ```
 ---
 
 ## 📌 Principales Módulos del Backend

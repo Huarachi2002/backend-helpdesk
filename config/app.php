@@ -67,7 +67,9 @@ return [
     |
     */
 
-    'timezone' => 'UTC',
+    // Bolivia (UTC-4, sin horario de verano). Debe coincidir con la zona de la
+    // sesión de PostgreSQL (config/database.php → pgsql.timezone).
+    'timezone' => env('APP_TIMEZONE', 'America/La_Paz'),
 
     /*
     |--------------------------------------------------------------------------

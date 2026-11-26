@@ -8,6 +8,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 use App\Exports\TicketExport;
+use App\Exports\MetricsReportExport;
+use App\Services\MetricsReportService;
 use Maatwebsite\Excel\Facades\Excel;
 use Barryvdh\DomPDF\Facade\Pdf;
 
@@ -146,5 +148,84 @@ class ReportController extends Controller
                 'tiempos_globales'  => $tiemposGlobales,
             ]);
         });
+    }
+
+    // ------------------------------------------------------------------
+    // Reporte de Métricas FRT / MTTR (Administrador y Técnico de Soporte)
+    // ------------------------------------------------------------------
+
+    /**
+     * Opciones para los filtros del reporte: técnicos de soporte y categorías.
+     */
+    public function metricsOptions(MetricsReportService $service)
+    {
+        return response()->json([
+            'technicians' => $service->technicians()->values(),
+            'categories'  => $service->categories()->values(),
+            'levels'      => MetricsReportService::LEVELS,
+        ]);
+    }
+
+    /**
+     * Volumen, FRT y MTTR en un rango de fechas, por nivel (general, técnico o categoría),
+     * filtrable por técnico y por categoría.
+     */
+    public function metrics(Request $request, MetricsReportService $service)
+    {
+        return response()->json($service->build($this->validateMetricsFilters($request)));
+    }
+
+    public function metricsExport(Request $request, MetricsReportService $service)
+    {
+        $filters = $this->validateMetricsFilters($request);
+        $format  = $request->validate(['format' => 'nullable|in:pdf,excel,csv'])['format'] ?? 'excel';
+        $report  = $service->build($filters);
+
+        $name = sprintf(
+            'reporte_metricas_%s_%s_%s',
+            $report['filters']['level'],
+            $report['filters']['date_from'],
+            $report['filters']['date_to']
+        );
+
+        if ($format === 'pdf') {
+            return Pdf::loadView('exports.metrics_pdf', ['report' => $report])
+                ->setPaper('a4', 'landscape')
+                ->download("{$name}.pdf");
+        }
+
+        if ($format === 'csv') {
+            return Excel::download(new MetricsReportExport($report), "{$name}.csv", \Maatwebsite\Excel\Excel::CSV);
+        }
+
+        return Excel::download(new MetricsReportExport($report), "{$name}.xlsx");
+    }
+
+    private function validateMetricsFilters(Request $request): array
+    {
+        $data = $request->validate([
+            'date_from'     => 'nullable|date_format:Y-m-d',
+            'date_to'       => 'nullable|date_format:Y-m-d',
+            'level'         => 'nullable|in:' . implode(',', MetricsReportService::LEVELS),
+            'technician_id' => 'nullable|integer|exists:usuarios,id',
+            'category_id'   => 'nullable|integer|exists:categorias,id',
+        ], [
+            'date_from.date_format' => 'La fecha "Desde" debe tener el formato AAAA-MM-DD.',
+            'date_to.date_format'   => 'La fecha "Hasta" debe tener el formato AAAA-MM-DD.',
+            'technician_id.exists'  => 'El técnico seleccionado no existe.',
+            'category_id.exists'    => 'La categoría seleccionada no existe.',
+        ]);
+
+        // Por defecto: últimos 30 días.
+        $data['date_to']   = $data['date_to'] ?? now()->toDateString();
+        $data['date_from'] = $data['date_from'] ?? now()->subDays(29)->toDateString();
+
+        if ($data['date_from'] > $data['date_to']) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'date_to' => 'La fecha "Hasta" no puede ser anterior a la fecha "Desde".',
+            ]);
+        }
+
+        return $data;
     }
 }
