@@ -13,7 +13,7 @@ class NotificationController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $query = Notificacion::where('usuario_id', $user->id)
+        $query = Notificacion::where('usuario_ci', $user->ci)
             ->with(['ticket.prioridad', 'ticket.categorias'])
             ->orderBy('fecha_creacion', 'desc');
 
@@ -23,7 +23,7 @@ class NotificationController extends Controller
 
         $limit = min((int) ($request->get('limit', 20)), 100);
         $notifications = $query->paginate($limit);
-        $unreadCount = Notificacion::where('usuario_id', $user->id)->unread()->count();
+        $unreadCount = Notificacion::where('usuario_ci', $user->ci)->unread()->count();
 
         return response()->json([
             'unread_count' => $unreadCount,
@@ -40,7 +40,7 @@ class NotificationController extends Controller
     public function unreadCount(Request $request)
     {
         $user = $request->user();
-        $count = Notificacion::where('usuario_id', $user->id)
+        $count = Notificacion::where('usuario_ci', $user->ci)
             ->unread()
             ->count();
 
@@ -55,7 +55,7 @@ class NotificationController extends Controller
     public function markAsRead(Request $request, $id)
     {
         $user = $request->user();
-        $notificacion = Notificacion::where('usuario_id', $user->id)->findOrFail($id);
+        $notificacion = Notificacion::where('usuario_ci', $user->ci)->findOrFail($id);
 
         if (!$notificacion->leida) {
             $notificacion->update([
@@ -64,7 +64,7 @@ class NotificationController extends Controller
             ]);
         }
 
-        $unreadCount = Notificacion::where('usuario_id', $user->id)->unread()->count();
+        $unreadCount = Notificacion::where('usuario_ci', $user->ci)->unread()->count();
 
         return response()->json([
             'message'      => 'Notificación marcada como leída.',
@@ -80,7 +80,7 @@ class NotificationController extends Controller
     {
         $user = $request->user();
 
-        Notificacion::where('usuario_id', $user->id)
+        Notificacion::where('usuario_ci', $user->ci)
             ->where('leida', false)
             ->update([
                 'leida'       => true,
@@ -99,10 +99,10 @@ class NotificationController extends Controller
     public function destroy(Request $request, $id)
     {
         $user = $request->user();
-        $notificacion = Notificacion::where('usuario_id', $user->id)->findOrFail($id);
+        $notificacion = Notificacion::where('usuario_ci', $user->ci)->findOrFail($id);
         $notificacion->delete();
 
-        $unreadCount = Notificacion::where('usuario_id', $user->id)->unread()->count();
+        $unreadCount = Notificacion::where('usuario_ci', $user->ci)->unread()->count();
 
         return response()->json([
             'message'      => 'Notificación eliminada.',

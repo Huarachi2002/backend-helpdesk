@@ -4,9 +4,9 @@ namespace App\Services;
 
 use App\Contracts\Mail\MailReceiver;
 use App\Contracts\Mail\MailSender;
+use App\Models\Asignacion;
 use App\Models\Configuracion;
 use App\Models\Ticket;
-use App\Models\TicketAsignacion;
 use App\Models\User;
 use App\Services\Mail\OutgoingMail;
 use Illuminate\Support\Facades\Log;
@@ -117,15 +117,17 @@ class MailService
     /**
      * Notificación de Solicitud de Reasignación enviada al Administrador.
      */
-    public function sendReassignmentRequested(Ticket $ticket, TicketAsignacion $reasignacion, array $admins): void
+    public function sendReassignmentRequested(Ticket $ticket, Asignacion $reasignacion, array $admins): void
     {
         if (!$this->isMailActive()) return;
         if (!Configuracion::allowsNotification('SOLICITUD_REASIGNACION', 'email')) return;
 
+        $reasignacion->loadMissing('participantes.usuario');
         $sender = $this->getSender();
         $actionUrl = $this->getFrontendUrl() . '/tickets/' . $ticket->id;
-        $solicitanteName = $ticket->assignee?->name ?? 'Técnico de soporte';
-        $propuestoName = $reasignacion->tecnico?->name ?? 'Técnico propuesto';
+        $solicitanteName = ($reasignacion->solicitante() ?? $ticket->assignee)?->name ?? 'Técnico de soporte';
+        $anteriorName = ($reasignacion->tecnicoOrigen() ?? $ticket->assignee)?->name ?? $solicitanteName;
+        $propuestoName = $reasignacion->tecnicoDestino()?->name ?? 'Técnico propuesto';
 
         foreach ($admins as $admin) {
             if (!$admin || empty($admin->correo)) continue;
@@ -134,10 +136,10 @@ class MailService
                 'subject'               => "[Solicitud Reasignación] Ticket {$ticket->codigo}",
                 'ticket'                => $ticket,
                 'solicitanteName'       => $solicitanteName,
-                'tecnicoAnteriorName'   => $solicitanteName,
+                'tecnicoAnteriorName'   => $anteriorName,
                 'tecnicoPropuestoName'  => $propuestoName,
-                'motivo'                => $reasignacion->motivo,
-                'fechaSolicitud'        => $reasignacion->fecha_inicio ? $reasignacion->fecha_inicio->format('d/m/Y H:i') : now()->format('d/m/Y H:i'),
+                'motivo'                => $reasignacion->motivo_solicitud,
+                'fechaSolicitud'        => $reasignacion->fecha_creacion ? $reasignacion->fecha_creacion->format('d/m/Y H:i') : now()->format('d/m/Y H:i'),
                 'actionUrl'             => $actionUrl,
             ];
 
@@ -148,7 +150,7 @@ class MailService
     /**
      * Notificación de Reasignación Aprobada (Técnico y Creador del ticket).
      */
-    public function sendReassignmentApproved(Ticket $ticket, TicketAsignacion $reasignacion, User $newAgent, User $creator, User $revisor): void
+    public function sendReassignmentApproved(Ticket $ticket, Asignacion $reasignacion, User $newAgent, User $creator, User $revisor): void
     {
         if (!$this->isMailActive()) return;
         if (!Configuracion::allowsNotification('REASIGNACION', 'email')) return;
@@ -166,7 +168,7 @@ class MailService
                 'ticket'           => $ticket,
                 'nuevoTecnicoName' => $newAgent->name,
                 'revisorName'      => $revisor->name,
-                'motivo'           => $reasignacion->motivo,
+                'motivo'           => $reasignacion->motivo_solicitud,
                 'notaResolucion'   => $reasignacion->motivo_resolucion,
                 'actionUrl'        => $actionUrl,
             ];
@@ -178,7 +180,7 @@ class MailService
     /**
      * Notificación de Reasignación Rechazada (Solo al técnico solicitante).
      */
-    public function sendReassignmentRejected(Ticket $ticket, TicketAsignacion $reasignacion, User $requestingTechnician, User $revisor): void
+    public function sendReassignmentRejected(Ticket $ticket, Asignacion $reasignacion, User $requestingTechnician, User $revisor): void
     {
         if (!$this->isMailActive()) return;
         if (!Configuracion::allowsNotification('REASIGNACION', 'email')) return;
@@ -266,6 +268,49 @@ class MailService
         ];
 
         $this->sendMailSafe('emails.ticket_sin_respuesta', $data, $solicitante->correo, $solicitante->name, $data['subject'], $sender);
+    }
+
+    /**
+     * Notificación de Relevamiento / Devolución de ticket.
+     * - Receptor: detalle completo (quién lo relevó, cargo destino y motivo).
+     * - Solicitante: aviso genérico sin datos internos de la estructura.
+     */
+    public function sendTicketEscalated(Ticket $ticket, Asignacion $movimiento, User $actor, User $receptor, ?User $solicitante): void
+    {
+        if (!$this->isMailActive()) return;
+        if (!Configuracion::allowsNotification('TICKET_RELEVADO', 'email')) return;
+
+        $sender = $this->getSender();
+        $actionUrl = $this->getFrontendUrl() . '/tickets/' . $ticket->id;
+        $esDevolucion = $movimiento->tipo_origen === Asignacion::TIPO_DEVOLUCION;
+
+        if (!empty($receptor->correo) && $receptor->id !== $actor->id) {
+            $data = [
+                'subject'       => ($esDevolucion ? '[Ticket Devuelto] ' : '[Ticket Relevado] ') . "Ticket {$ticket->codigo}",
+                'recipientName' => $receptor->name,
+                'ticket'        => $ticket,
+                'esSolicitante' => false,
+                'esDevolucion'  => $esDevolucion,
+                'tipo'          => $movimiento->tipo_origen,
+                'actorName'     => $actor->name,
+                'cargo'         => $movimiento->cargoDestino,
+                'motivo'        => $movimiento->motivo_solicitud,
+                'actionUrl'     => $actionUrl,
+            ];
+            $this->sendMailSafe('emails.ticket_relevado', $data, $receptor->correo, $receptor->name, $data['subject'], $sender);
+        }
+
+        if ($solicitante && !empty($solicitante->correo) && $solicitante->id !== $actor->id && $solicitante->id !== $receptor->id) {
+            $data = [
+                'subject'       => "[Actualización] Tu ticket {$ticket->codigo} fue derivado",
+                'recipientName' => $solicitante->name,
+                'ticket'        => $ticket,
+                'esSolicitante' => true,
+                'esDevolucion'  => $esDevolucion,
+                'actionUrl'     => $actionUrl,
+            ];
+            $this->sendMailSafe('emails.ticket_relevado', $data, $solicitante->correo, $solicitante->name, $data['subject'], $sender);
+        }
     }
 
     /**

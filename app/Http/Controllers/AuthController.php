@@ -27,7 +27,7 @@ class AuthController extends Controller
             return response()->json(['message' => 'Credenciales incorrectas'], 401);
         }
 
-        AuditLog::registrar('LOGIN_OK', $user->id, ['descripcion' => 'Inicio de sesión exitoso']);
+        AuditLog::registrar('LOGIN_OK', $user->ci, ['descripcion' => 'Inicio de sesión exitoso']);
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
@@ -35,7 +35,8 @@ class AuthController extends Controller
             'access_token' => $token,
             'token_type'   => 'Bearer',
             'user'         => [
-                'id'       => $user->id,
+                'id'       => $user->ci,
+                'ci'       => $user->ci,
                 'name'     => $user->name,
                 'nombre'   => $user->nombre,
                 'apellido' => $user->apellido,
@@ -44,6 +45,12 @@ class AuthController extends Controller
                 'role'     => $user->role,
                 'rol'      => $user->rol?->nombre,
                 'activo'   => $user->activo,
+                'cargo'    => $user->cargo ? [
+                    'codigo'  => $user->cargo->codigo,
+                    'nombre'  => $user->cargo->nombre,
+                    'seccion' => $user->cargo->seccion,
+                    'nivel'   => $user->cargo->nivel,
+                ] : null,
             ]
         ]);
     }
@@ -55,7 +62,8 @@ class AuthController extends Controller
             $user->load('rol');
         }
         return response()->json([
-            'id'       => $user->id,
+            'id'       => $user->ci,
+            'ci'       => $user->ci,
             'name'     => $user->name,
             'nombre'   => $user->nombre,
             'apellido' => $user->apellido,
@@ -64,12 +72,18 @@ class AuthController extends Controller
             'role'     => $user->role,
             'rol'      => $user->rol?->nombre,
             'activo'   => $user->activo,
+            'cargo'    => $user->cargo ? [
+                'codigo'  => $user->cargo->codigo,
+                'nombre'  => $user->cargo->nombre,
+                'seccion' => $user->cargo->seccion,
+                'nivel'   => $user->cargo->nivel,
+            ] : null,
         ]);
     }
 
     public function logout(Request $request)
     {
-        AuditLog::registrar('LOGOUT', $request->user()->id, ['descripcion' => 'Cierre de sesión']);
+        AuditLog::registrar('LOGOUT', $request->user()->ci, ['descripcion' => 'Cierre de sesión']);
         $request->user()->tokens()->delete();
         return response()->json(['message' => 'Logout exitoso']);
     }

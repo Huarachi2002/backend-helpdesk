@@ -65,7 +65,7 @@ class InboundMailProcessor
             return InboundMailResult::make(InboundMailResult::IGNORED, 'Respuesta automática (fuera de oficina, rebote o lista).');
         }
 
-        if ($mail->messageId && TicketMensaje::where('correo_message_id', $mail->messageId)->exists()) {
+        if ($mail->messageId && TicketMensaje::where('correo_mensaje_id', $mail->messageId)->exists()) {
             return InboundMailResult::make(InboundMailResult::DUPLICATE, 'El correo ya estaba registrado.');
         }
 
@@ -128,9 +128,9 @@ class InboundMailProcessor
         $ids = $mail->threadIds();
 
         if ($ids) {
-            $mensaje = TicketMensaje::whereIn('correo_message_id', $ids)->latest('fecha_creacion')->first();
+            $mensaje = TicketMensaje::whereIn('correo_mensaje_id', $ids)->latest('fecha_creacion')->first();
             if ($mensaje) {
-                return Ticket::find($mensaje->ticket_id);
+                return Ticket::find($mensaje->ticket_codigo);
             }
 
             $ticket = Ticket::whereIn('correo_hilo', $ids)->first();

@@ -9,20 +9,20 @@ class AuditLogController extends Controller
 {
     public function index(Request $request)
     {
-        $query = AuditLog::with('usuario:id,nombre,apellido,correo')
-            ->orderBy('created_at', 'desc');
+        $query = AuditLog::with('usuario:ci,nombre,apellido,correo')
+            ->orderBy('fecha_creacion', 'desc');
 
         if ($request->filled('tipo_evento')) {
             $query->where('tipo_evento', $request->tipo_evento);
         }
-        if ($request->filled('usuario_id')) {
-            $query->where('usuario_id', $request->usuario_id);
+        if ($request->filled('usuario_ci') || $request->filled('usuario_id')) {
+            $query->where('usuario_ci', $request->input('usuario_ci', $request->input('usuario_id')));
         }
         if ($request->filled('fecha_desde')) {
-            $query->whereDate('created_at', '>=', $request->fecha_desde);
+            $query->whereDate('fecha_creacion', '>=', $request->fecha_desde);
         }
         if ($request->filled('fecha_hasta')) {
-            $query->whereDate('created_at', '<=', $request->fecha_hasta);
+            $query->whereDate('fecha_creacion', '<=', $request->fecha_hasta);
         }
         if ($request->filled('ip')) {
             $query->where('ip', 'like', '%' . $request->ip . '%');
@@ -48,20 +48,20 @@ class AuditLogController extends Controller
 
         // Intentos de login fallidos en las últimas 24h
         $loginsFallidos24h = AuditLog::where('tipo_evento', 'LOGIN_FAIL')
-            ->where('created_at', '>=', now()->subDay())
+            ->where('fecha_creacion', '>=', now()->subDay())
             ->count();
 
         // Logins exitosos últimas 24h
         $loginsExitosos24h = AuditLog::where('tipo_evento', 'LOGIN_OK')
-            ->where('created_at', '>=', now()->subDay())
+            ->where('fecha_creacion', '>=', now()->subDay())
             ->count();
 
         // Actividad por día (últimos 7 días)
         $actividadReciente = AuditLog::select(
-                DB::raw("TO_CHAR(created_at, 'YYYY-MM-DD') as fecha"),
+                DB::raw("TO_CHAR(fecha_creacion, 'YYYY-MM-DD') as fecha"),
                 DB::raw('count(*) as total')
             )
-            ->where('created_at', '>=', now()->subDays(7))
+            ->where('fecha_creacion', '>=', now()->subDays(7))
             ->groupBy('fecha')
             ->orderBy('fecha')
             ->get();

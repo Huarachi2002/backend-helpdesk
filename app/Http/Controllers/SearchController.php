@@ -31,19 +31,19 @@ class SearchController extends Controller
         // Si es técnico (no admin), solo ver sus tickets asignados o creados
         if (!$isAdmin) {
             $ticketsQuery->where(function($q2) use ($user) {
-                $q2->where('tecnico_asignado_id', $user->id)
-                   ->orWhere('solicitante_id', $user->id);
+                $q2->where('tecnico_asignado_ci', $user->ci)
+                   ->orWhere('solicitante_ci', $user->ci);
             });
         }
 
         $tickets = $ticketsQuery->get()->map(function($t) {
             return [
-                'id'     => $t->id,
+                'id'     => $t->codigo,
                 'codigo' => $t->codigo,
                 'asunto' => $t->asunto,
                 'estado' => $t->estado,
                 'type'   => 'ticket',
-                'url'    => "/tickets/{$t->id}",
+                'url'    => "/tickets/{$t->codigo}",
             ];
         });
 
@@ -52,7 +52,8 @@ class SearchController extends Controller
         if ($isAdmin) {
             $usuarios = User::with('rol')
                 ->where(function($q2) use ($q) {
-                    $q2->where('nombre', 'ilike', "%{$q}%")
+                    $q2->where('ci', 'ilike', "%{$q}%")
+                       ->orWhere('nombre', 'ilike', "%{$q}%")
                        ->orWhere('apellido', 'ilike', "%{$q}%")
                        ->orWhere('correo', 'ilike', "%{$q}%");
                 })
@@ -60,7 +61,8 @@ class SearchController extends Controller
                 ->get()
                 ->map(function($u) {
                     return [
-                        'id'     => $u->id,
+                        'id'     => $u->ci,
+                        'ci'     => $u->ci,
                         'nombre' => $u->nombre . ' ' . $u->apellido,
                         'correo' => $u->correo,
                         'rol'    => $u->rol?->nombre,

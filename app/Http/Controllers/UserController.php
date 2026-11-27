@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Cargo;
 use App\Models\Rol;
 use App\Models\TicketPrioridad;
 use App\Models\User;
@@ -16,7 +17,7 @@ class UserController extends Controller
      */
     public function index(Request $request)
     {
-        $query = User::query()->with(['rol', 'categorias', 'prioridades'])
+        $query = User::query()->with(['rol', 'categorias', 'prioridades', 'cargo'])
             ->withCount([
                 'assignedTickets' => function ($q) {
                     $q->whereNotIn('estado', ['RESUELTO', 'CERRADO']);
@@ -24,10 +25,11 @@ class UserController extends Controller
                 'createdTickets'
             ]);
 
-        // Filtro por búsqueda de nombre o correo
+        // Filtro por búsqueda de CI, nombre o correo
         $query->when($request->search, function ($q, $search) {
             $q->where(function ($sub) use ($search) {
-                $sub->where('nombre', 'like', "%{$search}%")
+                $sub->where('ci', 'like', "%{$search}%")
+                    ->orWhere('nombre', 'like', "%{$search}%")
                     ->orWhere('apellido', 'like', "%{$search}%")
                     ->orWhere('correo', 'like', "%{$search}%");
             });
@@ -65,7 +67,7 @@ class UserController extends Controller
      */
     public function show($id)
     {
-        $user = User::with(['rol', 'categorias', 'prioridades'])
+        $user = User::with(['rol', 'categorias', 'prioridades', 'cargo'])
             ->withCount([
                 'assignedTickets' => function ($q) {
                     $q->whereNotIn('estado', ['RESUELTO', 'CERRADO']);
@@ -83,6 +85,7 @@ class UserController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
+            'ci'                 => 'required|string|max:30|unique:usuarios,ci',
             'name'               => 'required_without:nombre|string|max:255',
             'nombre'             => 'required_without:name|string|max:100',
             'apellido'           => 'nullable|string|max:100',
@@ -94,10 +97,14 @@ class UserController extends Controller
             'is_active'          => 'nullable|boolean',
             'sesion'             => 'nullable|boolean',
             'moodle_user_id'     => 'nullable|integer',
+            'moodle_usuario_id'  => 'nullable|integer',
             'allowed_priorities' => 'nullable|array',
             'category_ids'       => 'nullable|array',
             'category_ids.*'     => 'integer|exists:categorias,id',
+            'cargo_codigo'       => 'nullable|string|exists:cargos,codigo',
         ], [
+            'ci.required'           => 'El CI del usuario es obligatorio.',
+            'ci.unique'             => 'Ya existe un usuario registrado con este CI.',
             'email.unique'          => 'El correo electrónico ya está registrado.',
             'correo.unique'         => 'El correo electrónico ya está registrado.',
             'category_ids.*.exists' => 'Una de las categorías seleccionadas no es válida.',
@@ -120,15 +127,26 @@ class UserController extends Controller
                 $rolId = $rol ? $rol->id : 4; // 4 = ESTUDIANTE
             }
 
+            // Cargo en la estructura organizacional: obligatorio para el personal
+            $cargoCodigo = null;
+            if ($this->isStaffRolId($rolId)) {
+                $cargoCodigo = $validated['cargo_codigo'] ?? null;
+                if ($error = $this->validarCargoDestino($cargoCodigo)) {
+                    return $error;
+                }
+            }
+
             $user = User::create([
-                'rol_id'         => $rolId,
-                'nombre'         => $nombre,
-                'apellido'       => $apellido,
-                'correo'         => $correo,
-                'contrasenia'    => Hash::make($validated['password']),
-                'sesion'         => $request->has('sesion') ? $request->boolean('sesion') : in_array($rolId, [1, 2]),
-                'moodle_user_id' => $request->input('moodle_user_id'),
-                'activo'         => $request->boolean('is_active', true),
+                'ci'                => trim($validated['ci']),
+                'rol_id'            => $rolId,
+                'cargo_codigo'      => $cargoCodigo,
+                'nombre'            => $nombre,
+                'apellido'          => $apellido,
+                'correo'            => $correo,
+                'contrasenia'       => Hash::make($validated['password']),
+                'sesion'            => $request->has('sesion') ? $request->boolean('sesion') : in_array($rolId, [1, 2]),
+                'moodle_usuario_id' => $request->input('moodle_usuario_id', $request->input('moodle_user_id')),
+                'activo'            => $request->boolean('is_active', true),
             ]);
 
             // Asignar categorías en usuario_categoria
@@ -136,16 +154,16 @@ class UserController extends Controller
                 $user->categorias()->sync($validated['category_ids']);
             }
 
-            // Asignar prioridades en usuario_prioridad
+            // Asignar prioridades en usuario_prioridad (PK: codigo)
             if (!empty($validated['allowed_priorities'])) {
-                $priorityIds = TicketPrioridad::whereIn('codigo', array_map('strtoupper', $validated['allowed_priorities']))
+                $priorityCodigos = TicketPrioridad::whereIn('codigo', array_map('strtoupper', $validated['allowed_priorities']))
                     ->orWhereIn(DB::raw('LOWER(codigo)'), array_map('strtolower', $validated['allowed_priorities']))
-                    ->pluck('id')
+                    ->pluck('codigo')
                     ->toArray();
-                $user->prioridades()->sync($priorityIds);
+                $user->prioridades()->sync($priorityCodigos);
             }
 
-            $user->load(['rol', 'categorias', 'prioridades']);
+            $user->load(['rol', 'categorias', 'prioridades', 'cargo']);
 
             return response()->json([
                 'message' => 'Usuario creado exitosamente.',
@@ -162,24 +180,38 @@ class UserController extends Controller
         $user = User::findOrFail($id);
 
         $validated = $request->validate([
+            'ci'                 => 'nullable|string|max:30|unique:usuarios,ci,' . $user->ci . ',ci',
             'name'               => 'nullable|string|max:255',
             'nombre'             => 'nullable|string|max:100',
             'apellido'           => 'nullable|string|max:100',
-            'email'              => 'nullable|email|max:150|unique:usuarios,correo,' . $user->id,
-            'correo'             => 'nullable|email|max:150|unique:usuarios,correo,' . $user->id,
+            'email'              => 'nullable|email|max:150|unique:usuarios,correo,' . $user->ci . ',ci',
+            'correo'             => 'nullable|email|max:150|unique:usuarios,correo,' . $user->ci . ',ci',
             'password'           => 'nullable|string|min:6',
             'role'               => 'nullable|string',
             'rol_id'             => 'nullable|exists:roles,id',
             'is_active'          => 'nullable|boolean',
             'sesion'             => 'nullable|boolean',
             'moodle_user_id'     => 'nullable|integer',
+            'moodle_usuario_id'  => 'nullable|integer',
             'allowed_priorities' => 'nullable|array',
             'category_ids'       => 'nullable|array',
             'category_ids.*'     => 'integer|exists:categorias,id',
+            'cargo_codigo'       => 'nullable|string|exists:cargos,codigo',
         ]);
 
         return DB::transaction(function () use ($user, $validated, $request) {
             $updateData = [];
+
+            if (!empty($validated['ci']) && trim($validated['ci']) !== $user->ci) {
+                $oldCi = $user->ci;
+                $newCi = trim($validated['ci']);
+                $updateData['ci'] = $newCi;
+                // Mantener sincronizados tokens Sanctum si se cambia el CI
+                DB::table('personal_access_tokens')
+                    ->where('tokenable_type', User::class)
+                    ->where('tokenable_id', $oldCi)
+                    ->update(['tokenable_id' => $newCi]);
+            }
 
             if (isset($validated['nombre'])) {
                 $updateData['nombre'] = $validated['nombre'];
@@ -223,9 +255,29 @@ class UserController extends Controller
                 $updateData['sesion'] = $request->boolean('sesion');
             }
 
-            if ($request->has('moodle_user_id')) {
-                $updateData['moodle_user_id'] = $request->input('moodle_user_id');
+            if ($request->has('moodle_usuario_id') || $request->has('moodle_user_id')) {
+                $updateData['moodle_usuario_id'] = $request->input('moodle_usuario_id', $request->input('moodle_user_id'));
             }
+
+            // Cargo en la estructura organizacional
+            $finalRolId = $updateData['rol_id'] ?? $user->rol_id;
+            $finalActivo = $updateData['activo'] ?? $user->activo;
+            $finalCargo = null;
+            if ($this->isStaffRolId($finalRolId)) {
+                $finalCargo = $request->has('cargo_codigo') ? ($validated['cargo_codigo'] ?? null) : $user->cargo_codigo;
+                if ($finalCargo !== $user->cargo_codigo || !$user->cargo_codigo) {
+                    if ($error = $this->validarCargoDestino($finalCargo)) {
+                        return $error;
+                    }
+                }
+            }
+
+            if ($finalCargo !== $user->cargo_codigo || !$finalActivo) {
+                if ($error = $this->validarNoQuedaVacante($user)) {
+                    return $error;
+                }
+            }
+            $updateData['cargo_codigo'] = $finalCargo;
 
             $user->update($updateData);
 
@@ -234,16 +286,16 @@ class UserController extends Controller
                 $user->categorias()->sync($validated['category_ids']);
             }
 
-            // Sincronizar prioridades
+            // Sincronizar prioridades (PK: codigo)
             if (isset($validated['allowed_priorities'])) {
-                $priorityIds = TicketPrioridad::whereIn('codigo', array_map('strtoupper', $validated['allowed_priorities']))
+                $priorityCodigos = TicketPrioridad::whereIn('codigo', array_map('strtoupper', $validated['allowed_priorities']))
                     ->orWhereIn(DB::raw('LOWER(codigo)'), array_map('strtolower', $validated['allowed_priorities']))
-                    ->pluck('id')
+                    ->pluck('codigo')
                     ->toArray();
-                $user->prioridades()->sync($priorityIds);
+                $user->prioridades()->sync($priorityCodigos);
             }
 
-            $user->load(['rol', 'categorias', 'prioridades']);
+            $user->load(['rol', 'categorias', 'prioridades', 'cargo']);
 
             return response()->json([
                 'message' => 'Usuario y configuración actualizados exitosamente.',
@@ -258,13 +310,18 @@ class UserController extends Controller
     public function toggleActive(Request $request, $id)
     {
         $user = User::findOrFail($id);
+
+        if ($user->activo && ($error = $this->validarNoQuedaVacante($user))) {
+            return $error;
+        }
+
         $user->activo = !$user->activo;
         $user->save();
 
         return response()->json([
             'message'   => 'Disponibilidad del usuario actualizada.',
             'is_active' => $user->activo,
-            'data'      => $user->load(['rol', 'categorias', 'prioridades']),
+            'data'      => $user->load(['rol', 'categorias', 'prioridades', 'cargo']),
         ]);
     }
 
@@ -293,10 +350,63 @@ class UserController extends Controller
             ], 422);
         }
 
+        if ($error = $this->validarNoQuedaVacante($user)) {
+            return $error;
+        }
+
         $user->delete();
 
         return response()->json([
             'message' => 'Usuario eliminado correctamente.'
         ]);
+    }
+
+    // --- Reglas de la Estructura Organizacional ---
+
+    private function isStaffRolId($rolId): bool
+    {
+        $nombre = strtoupper(Rol::where('id', $rolId)->value('nombre') ?? '');
+        return in_array($nombre, User::STAFF_ROLES, true);
+    }
+
+    /**
+     * El personal debe ocupar un cargo activo de la estructura.
+     */
+    private function validarCargoDestino(?string $cargoCodigo)
+    {
+        if (!$cargoCodigo) {
+            return response()->json([
+                'message' => 'El cargo en la estructura organizacional es obligatorio para Directores y Técnicos.',
+                'errors'  => ['cargo_codigo' => ['Debes seleccionar el cargo que ocupa el usuario.']],
+                'error'   => 'cargo_required',
+            ], 422);
+        }
+
+        $cargo = Cargo::find($cargoCodigo);
+        if (!$cargo || !$cargo->activo) {
+            return response()->json([
+                'message' => 'El cargo seleccionado está inactivo.',
+                'errors'  => ['cargo_codigo' => ['El cargo seleccionado está inactivo.']],
+                'error'   => 'inactive_cargo',
+            ], 422);
+        }
+
+        return null;
+    }
+
+    /**
+     * Ningún cargo puede quedar sin al menos un usuario activo.
+     */
+    private function validarNoQuedaVacante(User $user)
+    {
+        $vacante = Cargo::quedariaVacanteSiSale($user);
+        if (!$vacante) {
+            return null;
+        }
+
+        return response()->json([
+            'message' => "{$user->name} es el único titular activo del cargo «{$vacante->nombre}». Asigna primero a otra persona a ese cargo para no dejarlo vacante.",
+            'error'   => 'cargo_would_be_vacant',
+        ], 422);
     }
 }

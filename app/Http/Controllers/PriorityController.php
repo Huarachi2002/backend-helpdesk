@@ -33,8 +33,8 @@ class PriorityController extends Controller
             }
         }
 
-        // Ordenar por peso de nivel descendente (mayor urgencia primero) o por id
-        $query->orderBy('peso_nivel', 'desc')->orderBy('id', 'asc');
+        // Ordenar por peso de nivel descendente (mayor urgencia primero) o por código
+        $query->orderBy('peso_nivel', 'desc')->orderBy('codigo', 'asc');
 
         $priorities = $query->get()->map(function ($p) {
             return [
@@ -148,8 +148,8 @@ class PriorityController extends Controller
         $prioridad = TicketPrioridad::findOrFail($id);
 
         $validated = $request->validate([
-            'nombre'               => 'required|string|max:50|unique:ticket_prioridad,nombre,' . $prioridad->id,
-            'codigo'               => 'required|string|max:20|unique:ticket_prioridad,codigo,' . $prioridad->id,
+            'nombre'               => 'required|string|max:50|unique:ticket_prioridad,nombre,' . $prioridad->codigo . ',codigo',
+            'codigo'               => 'required|string|max:20|unique:ticket_prioridad,codigo,' . $prioridad->codigo . ',codigo',
             'peso_nivel'           => 'required|integer|min:1|max:100',
             'sla_horas_resolucion' => 'required|integer|min:1',
             'activo'               => 'nullable|boolean',

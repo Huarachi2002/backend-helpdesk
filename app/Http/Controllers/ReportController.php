@@ -48,11 +48,11 @@ class ReportController extends Controller
         $cacheKey = 'reports_impact_' . md5(json_encode($request->all()));
 
         return Cache::remember($cacheKey, 3600, function () {
-            $uniqueHumanUsers = Ticket::distinct('solicitante_id')->count('solicitante_id');
-            $uniqueBotUsers = BotInteraction::distinct('user_id')->count('user_id');
+            $uniqueHumanUsers = Ticket::distinct('solicitante_ci')->count('solicitante_ci');
+            $uniqueBotUsers = BotInteraction::distinct('usuario_ci')->count('usuario_ci');
             
             $totalBotInteractions = BotInteraction::count();
-            $resolvedByBot = BotInteraction::where('resolved', true)->count();
+            $resolvedByBot = BotInteraction::where('resuelto', true)->count();
             
             $autonomousRate = $totalBotInteractions > 0 ? round(($resolvedByBot / $totalBotInteractions) * 100, 2) : 0;
             $escalationRate = $totalBotInteractions > 0 ? round((($totalBotInteractions - $resolvedByBot) / $totalBotInteractions) * 100, 2) : 0;
@@ -207,7 +207,7 @@ class ReportController extends Controller
             'date_from'     => 'nullable|date_format:Y-m-d',
             'date_to'       => 'nullable|date_format:Y-m-d',
             'level'         => 'nullable|in:' . implode(',', MetricsReportService::LEVELS),
-            'technician_id' => 'nullable|integer|exists:usuarios,id',
+            'technician_id' => 'nullable|string|exists:usuarios,ci',
             'category_id'   => 'nullable|integer|exists:categorias,id',
         ], [
             'date_from.date_format' => 'La fecha "Desde" debe tener el formato AAAA-MM-DD.',

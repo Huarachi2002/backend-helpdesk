@@ -13,24 +13,26 @@ class User extends Authenticatable
 
     protected $table = 'usuarios';
 
+    protected $primaryKey = 'ci';
+    public $incrementing = false;
+    protected $keyType = 'string';
+
     public const CREATED_AT = 'fecha_creacion';
     public const UPDATED_AT = 'fecha_actualizacion';
 
-    /**
-     * Attributes that are mass assignable.
-     *
-     * @var array<int, string>
-     */
     protected $fillable = [
+        'ci',
         'rol_id',
+        'cargo_codigo',
         'nombre',
         'apellido',
         'correo',
         'contrasenia',
         'sesion',
-        'moodle_user_id',
+        'moodle_usuario_id',
         'activo',
-        // Virtual/compatibility fields
+        // Campos virtuales de compatibilidad
+        'moodle_user_id',
         'name',
         'email',
         'password',
@@ -38,11 +40,6 @@ class User extends Authenticatable
         'department',
     ];
 
-    /**
-     * Attributes hidden for serialization.
-     *
-     * @var array<int, string>
-     */
     protected $hidden = [
         'contrasenia',
         'remember_token',
@@ -54,6 +51,7 @@ class User extends Authenticatable
     ];
 
     protected $appends = [
+        'id',
         'name',
         'email',
         'role',
@@ -69,6 +67,21 @@ class User extends Authenticatable
     }
 
     // --- Accesores y Mutadores de Compatibilidad ---
+
+    public function getIdAttribute()
+    {
+        return $this->attributes['ci'] ?? null;
+    }
+
+    public function getMoodleUserIdAttribute()
+    {
+        return $this->attributes['moodle_usuario_id'] ?? null;
+    }
+
+    public function setMoodleUserIdAttribute($value)
+    {
+        $this->attributes['moodle_usuario_id'] = $value;
+    }
 
     public function getNameAttribute()
     {
@@ -150,35 +163,70 @@ class User extends Authenticatable
         return $this->belongsTo(Rol::class, 'rol_id');
     }
 
+    /**
+     * Cargo que ocupa el usuario en la estructura organizacional (solo personal).
+     */
+    public function cargo()
+    {
+        return $this->belongsTo(Cargo::class, 'cargo_codigo', 'codigo');
+    }
+
+    /**
+     * Indica si el usuario forma parte del personal (Director o Técnico) y por lo tanto
+     * debe ocupar un cargo en la estructura organizacional.
+     */
+    public function isStaff(): bool
+    {
+        return in_array(strtoupper($this->rol?->nombre ?? ''), self::STAFF_ROLES, true);
+    }
+
+    /** Roles de sistema que forman parte del organigrama. */
+    public const STAFF_ROLES = ['DIRECTOR', 'TECNICO'];
+
     public function categorias()
     {
-        return $this->belongsToMany(Categoria::class, 'usuario_categoria', 'usuario_id', 'categoria_id')
+        return $this->belongsToMany(Categoria::class, 'usuario_categoria', 'usuario_ci', 'categoria_id', 'ci', 'id')
             ->withPivot('asignado_en');
     }
 
     public function prioridades()
     {
-        return $this->belongsToMany(TicketPrioridad::class, 'usuario_prioridad', 'usuario_id', 'prioridad_id')
+        return $this->belongsToMany(TicketPrioridad::class, 'usuario_prioridad', 'usuario_ci', 'prioridad_codigo', 'ci', 'codigo')
             ->withPivot('asignado_en');
     }
 
     public function createdTickets()
     {
-        return $this->hasMany(Ticket::class, 'solicitante_id');
+        return $this->hasMany(Ticket::class, 'solicitante_ci', 'ci');
     }
 
     public function assignedTickets()
     {
-        return $this->hasMany(Ticket::class, 'tecnico_asignado_id');
+        return $this->hasMany(Ticket::class, 'tecnico_asignado_ci', 'ci');
+    }
+
+    public function asignaciones()
+    {
+        return $this->belongsToMany(Asignacion::class, 'usuario_asignacion', 'usuario_ci', 'asignacion_id', 'ci', 'id')
+            ->using(UsuarioAsignacion::class)
+            ->withPivot(['rol_participacion', 'fecha_accion']);
     }
 
     public function botInteractions()
     {
-        return $this->hasMany(BotInteraction::class, 'user_id');
+        return $this->hasMany(BotInteraction::class, 'usuario_ci', 'ci');
     }
 
     public function configuraciones()
     {
-        return $this->hasMany(Configuracion::class, 'usuario_id');
+        return $this->hasMany(Configuracion::class, 'usuario_ci', 'ci');
+    }
+
+    /**
+     * Páginas en las que este usuario fue el último visitante registrado (relación 1:N).
+     */
+    public function visitasPagina()
+    {
+        return $this->hasMany(PageVisit::class, 'ultimo_usuario_ci', 'ci');
     }
 }

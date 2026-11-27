@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 
 class Ticket extends Model
 {
@@ -11,14 +12,18 @@ class Ticket extends Model
 
     protected $table = 'ticket';
 
+    protected $primaryKey = 'codigo';
+    public $incrementing = false;
+    protected $keyType = 'string';
+
     public const CREATED_AT = 'fecha_creacion';
     public const UPDATED_AT = 'fecha_actualizacion';
 
     protected $fillable = [
         'codigo',
-        'solicitante_id',
-        'tecnico_asignado_id',
-        'prioridad_id',
+        'solicitante_ci',
+        'tecnico_asignado_ci',
+        'prioridad_codigo',
         'asunto',
         'descripcion',
         'estado',
@@ -26,29 +31,44 @@ class Ticket extends Model
         'fecha_respuesta',
         'fecha_resuelto',
         'fecha_cierre',
+        'nivel_relevamiento',
 
         // Atributos de compatibilidad
         'title',
         'description',
         'status',
         'priority',
-        'category_id',
         'assigned_to',
         'created_by',
         'first_response_at',
         'resolved_at',
-        'moodle_user_id',
-        'moodle_course',
-        'moodle_role',
     ];
 
     protected $casts = [
-        'fecha_creacion'    => 'datetime',
-        'fecha_respuesta'   => 'datetime',
-        'fecha_resuelto'    => 'datetime',
-        'fecha_cierre'      => 'datetime',
+        'fecha_creacion'      => 'datetime',
+        'fecha_respuesta'     => 'datetime',
+        'fecha_resuelto'      => 'datetime',
+        'fecha_cierre'        => 'datetime',
         'fecha_actualizacion' => 'datetime',
+        'nivel_relevamiento'  => 'integer',
     ];
+
+    protected $appends = ['id'];
+
+    /**
+     * Genera el siguiente código único correlativo de ticket (ej: TCK-026) usando secuencia atómica.
+     */
+    public static function generarSiguienteCodigo(): string
+    {
+        if (DB::getDriverName() === 'pgsql') {
+            $next = (int) DB::selectOne("SELECT nextval('ticket_codigo_seq') AS val")->val;
+        } else {
+            $max = static::query()->count() + 1;
+            $next = $max;
+        }
+
+        return 'TCK-' . str_pad((string) $next, 3, '0', STR_PAD_LEFT);
+    }
 
     /**
      * Mapeo bidireccional entre códigos internos del State Pattern y la BD.
@@ -70,6 +90,11 @@ class Ticket extends Model
     ];
 
     // --- Accesores y Mutadores de Compatibilidad ---
+
+    public function getIdAttribute()
+    {
+        return $this->attributes['codigo'] ?? null;
+    }
 
     public function getTitleAttribute()
     {
@@ -104,12 +129,11 @@ class Ticket extends Model
 
     public function getPriorityAttribute()
     {
+        if (!empty($this->attributes['prioridad_codigo'])) {
+            return strtolower($this->attributes['prioridad_codigo']);
+        }
         if ($this->relationLoaded('prioridad') && $this->prioridad) {
             return strtolower($this->prioridad->codigo);
-        }
-        if (!empty($this->attributes['prioridad_id'])) {
-            $p = TicketPrioridad::find($this->attributes['prioridad_id']);
-            return $p ? strtolower($p->codigo) : 'medium';
         }
         return 'medium';
     }
@@ -118,7 +142,7 @@ class Ticket extends Model
     {
         $p = TicketPrioridad::whereRaw('LOWER(codigo) = ?', [strtolower($value)])->first();
         if ($p) {
-            $this->attributes['prioridad_id'] = $p->id;
+            $this->attributes['prioridad_codigo'] = $p->codigo;
         }
     }
 
@@ -134,22 +158,22 @@ class Ticket extends Model
 
     public function getAssignedToAttribute()
     {
-        return $this->attributes['tecnico_asignado_id'] ?? null;
+        return $this->attributes['tecnico_asignado_ci'] ?? null;
     }
 
     public function setAssignedToAttribute($value)
     {
-        $this->attributes['tecnico_asignado_id'] = $value;
+        $this->attributes['tecnico_asignado_ci'] = $value;
     }
 
     public function getCreatedByAttribute()
     {
-        return $this->attributes['solicitante_id'] ?? null;
+        return $this->attributes['solicitante_ci'] ?? null;
     }
 
     public function setCreatedByAttribute($value)
     {
-        $this->attributes['solicitante_id'] = $value;
+        $this->attributes['solicitante_ci'] = $value;
     }
 
     public function getFirstResponseAtAttribute()
@@ -184,7 +208,7 @@ class Ticket extends Model
 
     public function getMoodleUserIdAttribute()
     {
-        return $this->creator?->moodle_user_id ? 'moodle_std_' . $this->creator->moodle_user_id : 'moodle_std_1042';
+        return $this->creator?->moodle_usuario_id ? 'moodle_std_' . $this->creator->moodle_usuario_id : 'moodle_std_1042';
     }
 
     public function getMoodleCourseAttribute()
@@ -201,54 +225,60 @@ class Ticket extends Model
 
     public function categorias()
     {
-        return $this->belongsToMany(Categoria::class, 'ticket_categoria', 'ticket_id', 'categoria_id');
+        return $this->belongsToMany(Categoria::class, 'ticket_categoria', 'ticket_codigo', 'categoria_id', 'codigo', 'id');
     }
 
     public function prioridad()
     {
-        return $this->belongsTo(TicketPrioridad::class, 'prioridad_id');
+        return $this->belongsTo(TicketPrioridad::class, 'prioridad_codigo', 'codigo');
     }
 
     public function assignee()
     {
-        return $this->belongsTo(User::class, 'tecnico_asignado_id');
+        return $this->belongsTo(User::class, 'tecnico_asignado_ci', 'ci');
     }
 
     public function creator()
     {
-        return $this->belongsTo(User::class, 'solicitante_id');
+        return $this->belongsTo(User::class, 'solicitante_ci', 'ci');
     }
 
     public function history()
     {
-        return $this->hasMany(TicketHistory::class, 'ticket_id')->orderBy('created_at', 'asc')->orderBy('id', 'asc');
+        return $this->hasMany(TicketHistory::class, 'ticket_codigo', 'codigo')
+            ->orderBy('fecha_creacion', 'asc')
+            ->orderBy('id', 'asc');
     }
 
     public function mensajes()
     {
-        return $this->hasMany(TicketMensaje::class, 'ticket_id')->orderBy('fecha_creacion', 'asc');
+        return $this->hasMany(TicketMensaje::class, 'ticket_codigo', 'codigo')
+            ->orderBy('fecha_creacion', 'asc');
     }
 
     public function asignaciones()
     {
-        return $this->hasMany(TicketAsignacion::class, 'ticket_id')->orderBy('fecha_inicio', 'desc')->orderBy('id', 'desc');
+        return $this->hasMany(Asignacion::class, 'ticket_codigo', 'codigo')
+            ->orderBy('fecha_creacion', 'desc')
+            ->orderBy('id', 'desc');
     }
 
     public function asignacionActiva()
     {
-        return $this->hasOne(TicketAsignacion::class, 'ticket_id')->where('activo', true);
+        return $this->hasOne(Asignacion::class, 'ticket_codigo', 'codigo')
+            ->ofMany(['id' => 'max'], function ($query) {
+                $query->where('estado', Asignacion::ESTADO_APROBADA);
+            });
     }
 
     public function solicitudReasignacionPendiente()
     {
-        return $this->hasOne(TicketAsignacion::class, 'ticket_id')
-            ->where('solicitud_pendiente', true)
-            ->latestOfMany('fecha_inicio');
+        return $this->hasOne(Asignacion::class, 'ticket_codigo', 'codigo')
+            ->ofMany(['id' => 'max'], function ($query) {
+                $query->where('estado', Asignacion::ESTADO_PENDIENTE);
+            });
     }
 
-    /**
-     * Alias de compatibilidad
-     */
     public function reasignaciones()
     {
         return $this->asignaciones();

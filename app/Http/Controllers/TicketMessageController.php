@@ -74,8 +74,14 @@ class TicketMessageController extends Controller
         }
 
         $ticket->refresh()->load([
-            'categorias', 'prioridad', 'assignee.rol', 'creator.rol', 'history.changer.rol',
-            'solicitudReasignacionPendiente.tecnico.rol', 'asignaciones.tecnico.rol', 'mensajes.usuario.rol',
+            'categorias', 'prioridad', 'assignee.rol', 'assignee.cargo', 'creator.rol', 'history.changer.rol',
+            'solicitudReasignacionPendiente.participantes.usuario.rol',
+            'solicitudReasignacionPendiente.participantes.usuario.cargo',
+            'asignaciones.participantes.usuario.rol',
+            'asignaciones.participantes.usuario.cargo',
+            'asignaciones.cargoOrigen',
+            'asignaciones.cargoDestino',
+            'mensajes.usuario.rol',
         ]);
 
         $email = $result['email'];

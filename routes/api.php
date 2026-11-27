@@ -3,13 +3,16 @@
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BotInteractionController;
+use App\Http\Controllers\CargoController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\ConfigurationController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\PageVisitController;
 use App\Http\Controllers\PriorityController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SearchController;
 use App\Http\Controllers\TicketController;
+use App\Http\Controllers\TicketEscalationController;
 use App\Http\Controllers\TicketMessageController;
 use App\Http\Controllers\UserController;
 use Illuminate\Http\Request;
@@ -27,6 +30,10 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::post('/login', [AuthController::class, 'login']);
+
+// Contador global de accesos por página/vista (público para todos los usuarios y vistas)
+Route::post('/page-visits/track', [PageVisitController::class, 'track']);
+Route::get('/page-visits', [PageVisitController::class, 'index']);
 
 Route::middleware(['auth:sanctum', 'log.access'])->group(function () {
     
@@ -56,6 +63,13 @@ Route::middleware(['auth:sanctum', 'log.access'])->group(function () {
     Route::post('/tickets/{id}/reassignments/{requestId}/approve', [TicketController::class, 'approveReassignment']);
     Route::post('/tickets/{id}/reassignments/{requestId}/reject', [TicketController::class, 'rejectReassignment']);
 
+    // Relevamiento (movimiento vertical en la Estructura Organizacional) y devolución
+    Route::middleware('staff')->group(function () {
+        Route::get('/tickets/{id}/escalation-options', [TicketEscalationController::class, 'options']);
+        Route::post('/tickets/{id}/escalate', [TicketEscalationController::class, 'escalate']);
+        Route::post('/tickets/{id}/return', [TicketEscalationController::class, 'returnTicket']);
+    });
+
     // Auditoria de Interacciones (Bot)
     Route::get('/bot-interactions', [BotInteractionController::class, 'index']);
     Route::post('/bot-interactions', [BotInteractionController::class, 'store']);
@@ -71,6 +85,9 @@ Route::middleware(['auth:sanctum', 'log.access'])->group(function () {
         Route::get('/reports/metrics', [ReportController::class, 'metrics']);
         Route::get('/reports/metrics/options', [ReportController::class, 'metricsOptions']);
         Route::get('/reports/metrics/export', [ReportController::class, 'metricsExport']);
+
+        // Estructura Organizacional (lectura del organigrama)
+        Route::get('/org/cargos', [CargoController::class, 'index']);
     });
 
     // Notificaciones (Bandeja In-App del Usuario)
@@ -110,6 +127,14 @@ Route::middleware(['auth:sanctum', 'log.access'])->group(function () {
 
         // Dashboard General (Exclusivo Administrador)
         Route::get('/reports/dashboard', [ReportController::class, 'dashboard']);
+
+        // Estructura Organizacional: CRUD de cargos y asignación de personal
+        Route::post('/org/cargos', [CargoController::class, 'store']);
+        Route::put('/org/cargos/{codigo}', [CargoController::class, 'update']);
+        Route::patch('/org/cargos/{codigo}/toggle-active', [CargoController::class, 'toggleActive']);
+        Route::delete('/org/cargos/{codigo}', [CargoController::class, 'destroy']);
+        Route::get('/org/personal', [CargoController::class, 'personal']);
+        Route::patch('/org/personal/{id}/cargo', [CargoController::class, 'assignPersonal']);
 
         // Bitácora de Auditoría
         Route::get('/audit-logs', [AuditLogController::class, 'index']);

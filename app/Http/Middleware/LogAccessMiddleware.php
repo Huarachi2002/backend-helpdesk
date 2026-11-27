@@ -25,7 +25,7 @@ class LogAccessMiddleware
 
         // Solo registrar si el usuario está autenticado y la respuesta es exitosa (2xx)
         if ($request->user() && $response->getStatusCode() < 400) {
-            AuditLog::registrar('ACCESS', $request->user()->id, [
+            AuditLog::registrar('ACCESS', $request->user()->ci, [
                 'descripcion' => 'Acceso a recurso: ' . $path,
             ]);
         }

@@ -63,7 +63,7 @@ class TicketAssignmentService
         $candidates = $eligibleAgents->isNotEmpty() ? $eligibleAgents : $this->getFallbackCandidates();
 
         if ($candidates->isEmpty()) {
-            $ticket->tecnico_asignado_id = null;
+            $ticket->tecnico_asignado_ci = null;
             $ticket->save();
             return null;
         }
@@ -75,12 +75,12 @@ class TicketAssignmentService
         $chosen = $scoredCandidates->first();
 
         if ($chosen) {
-            $ticket->tecnico_asignado_id = $chosen->id;
+            $ticket->tecnico_asignado_ci = $chosen->ci;
             $ticket->save();
             return $chosen;
         }
 
-        $ticket->tecnico_asignado_id = null;
+        $ticket->tecnico_asignado_ci = null;
         $ticket->save();
         return null;
     }
@@ -146,7 +146,7 @@ class TicketAssignmentService
             return collect();
         }
 
-        $candidateIds = $candidates->pluck('id')->toArray();
+        $candidateCis = $candidates->pluck('ci')->toArray();
         $ticketCatIds = $ticket->categorias->pluck('id')->toArray();
         if (empty($ticketCatIds) && $ticket->category_id) {
             $ticketCatIds = [$ticket->category_id];
@@ -158,42 +158,42 @@ class TicketAssignmentService
 
         // --- Algoritmo 1: Carga actual de trabajo (tickets activos en curso) ---
         $workloads = DB::table('ticket')
-            ->select('tecnico_asignado_id', DB::raw('COUNT(*) as total'))
-            ->whereIn('tecnico_asignado_id', $candidateIds)
+            ->select('tecnico_asignado_ci', DB::raw('COUNT(*) as total'))
+            ->whereIn('tecnico_asignado_ci', $candidateCis)
             ->whereNotIn('estado', ['RESUELTO', 'CERRADO'])
-            ->groupBy('tecnico_asignado_id')
-            ->pluck('total', 'tecnico_asignado_id')
+            ->groupBy('tecnico_asignado_ci')
+            ->pluck('total', 'tecnico_asignado_ci')
             ->toArray();
 
         // --- Algoritmo 2: Experiencia / Especialidad en la categoría ---
         $catExp = [];
         if (!empty($ticketCatIds)) {
             $catExp = DB::table('ticket')
-                ->join('ticket_categoria', 'ticket.id', '=', 'ticket_categoria.ticket_id')
-                ->whereIn('ticket.tecnico_asignado_id', $candidateIds)
+                ->join('ticket_categoria', 'ticket.codigo', '=', 'ticket_categoria.ticket_codigo')
+                ->whereIn('ticket.tecnico_asignado_ci', $candidateCis)
                 ->whereIn('ticket_categoria.categoria_id', $ticketCatIds)
                 ->whereIn('ticket.estado', ['RESUELTO', 'CERRADO'])
-                ->select('ticket.tecnico_asignado_id', DB::raw('COUNT(*) as total'))
-                ->groupBy('ticket.tecnico_asignado_id')
-                ->pluck('total', 'tecnico_asignado_id')
+                ->select('ticket.tecnico_asignado_ci', DB::raw('COUNT(*) as total'))
+                ->groupBy('ticket.tecnico_asignado_ci')
+                ->pluck('total', 'tecnico_asignado_ci')
                 ->toArray();
         }
 
         // --- Algoritmos 3 & 4: Cumplimiento de SLA y Velocidad MTTR (horas de resolución) ---
         $slaAndMttr = DB::table('ticket')
-            ->leftJoin('ticket_prioridad', 'ticket.prioridad_id', '=', 'ticket_prioridad.id')
-            ->whereIn('ticket.tecnico_asignado_id', $candidateIds)
+            ->leftJoin('ticket_prioridad', 'ticket.prioridad_codigo', '=', 'ticket_prioridad.codigo')
+            ->whereIn('ticket.tecnico_asignado_ci', $candidateCis)
             ->whereIn('ticket.estado', ['RESUELTO', 'CERRADO'])
             ->whereNotNull('ticket.fecha_resuelto')
             ->select(
-                'ticket.tecnico_asignado_id',
+                'ticket.tecnico_asignado_ci',
                 DB::raw('COUNT(*) as total_resueltos'),
                 DB::raw('AVG(EXTRACT(EPOCH FROM (ticket.fecha_resuelto - ticket.fecha_creacion))/3600) as mttr_horas'),
                 DB::raw("SUM(CASE WHEN (EXTRACT(EPOCH FROM (ticket.fecha_resuelto - ticket.fecha_creacion))/3600) <= COALESCE(ticket_prioridad.sla_horas_resolucion, 48) THEN 1 ELSE 0 END) as dentro_sla")
             )
-            ->groupBy('ticket.tecnico_asignado_id')
+            ->groupBy('ticket.tecnico_asignado_ci')
             ->get()
-            ->keyBy('tecnico_asignado_id');
+            ->keyBy('tecnico_asignado_ci');
 
         // Parámetros de normalización relativa entre la muestra de candidatos
         $maxCatExp = !empty($catExp) ? max($catExp) : 0;
@@ -212,7 +212,7 @@ class TicketAssignmentService
             $workloads, $catExp, $slaAndMttr,
             $maxCatExp, $minMttr, $maxMttr, $weights
         ) {
-            $cid = $agent->id;
+            $cid = $agent->ci;
 
             // 1. Criterio Carga: Escala lineal sobre capacidad sugerida de 10 tickets
             $load = $workloads[$cid] ?? 0;

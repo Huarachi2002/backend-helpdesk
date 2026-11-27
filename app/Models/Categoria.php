@@ -47,12 +47,12 @@ class Categoria extends Model
 
     public function tickets()
     {
-        return $this->belongsToMany(Ticket::class, 'ticket_categoria', 'categoria_id', 'ticket_id');
+        return $this->belongsToMany(Ticket::class, 'ticket_categoria', 'categoria_id', 'ticket_codigo', 'id', 'codigo');
     }
 
     public function usuarios()
     {
-        return $this->belongsToMany(User::class, 'usuario_categoria', 'categoria_id', 'usuario_id')
+        return $this->belongsToMany(User::class, 'usuario_categoria', 'categoria_id', 'usuario_ci', 'id', 'ci')
             ->withPivot('asignado_en');
     }
 }

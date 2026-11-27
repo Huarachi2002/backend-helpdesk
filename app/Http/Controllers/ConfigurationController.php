@@ -46,7 +46,7 @@ class ConfigurationController extends Controller
                 } else {
                     $config->valor = (string) $val;
                 }
-                $config->usuario_id = $request->user()?->id ?? $config->usuario_id;
+                $config->usuario_ci = $request->user()?->ci ?? $config->usuario_ci;
                 $config->save();
             }
         }

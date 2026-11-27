@@ -83,15 +83,15 @@ class TicketReplyService
 
         $mensaje = DB::transaction(function () use ($ticket, $author, $body, $emisor, $targetStatus, $canal, $incomingMessageId) {
             $mensaje = TicketMensaje::create([
-                'ticket_id'         => $ticket->id,
-                'usuario_id'        => $author->id,
+                'ticket_codigo'     => $ticket->codigo,
+                'usuario_ci'        => $author->ci,
                 'tipo_emisor'       => $emisor,
                 'canal_origen'      => $canal,
-                'remitente_email'   => $author->correo ?? '',
+                'remitente_correo'  => $author->correo ?? '',
                 'remitente_nombre'  => $author->name,
                 'cuerpo_mensaje'    => $body,
                 // Respuesta recibida por correo: se guarda su Message-ID (hilo + deduplicación).
-                'correo_message_id' => $canal === self::CANAL_EMAIL ? $incomingMessageId : null,
+                'correo_mensaje_id' => $canal === self::CANAL_EMAIL ? $incomingMessageId : null,
             ]);
 
             if ($targetStatus) {
@@ -131,13 +131,13 @@ class TicketReplyService
      */
     public function resolveEmisor(Ticket $ticket, User $author): string
     {
-        if ((int) $ticket->solicitante_id === (int) $author->id) {
+        if ((string) $ticket->solicitante_ci === (string) $author->ci) {
             return self::EMISOR_CLIENTE;
         }
 
         $rol = strtoupper($author->rol?->nombre ?? '');
         $isAdmin = in_array($rol, ['DIRECTOR', 'ADMINISTRADOR', 'ADMIN'], true);
-        $isAssignee = (int) $ticket->tecnico_asignado_id === (int) $author->id;
+        $isAssignee = (string) $ticket->tecnico_asignado_ci === (string) $author->ci;
 
         if ($isAdmin || $isAssignee) {
             return self::EMISOR_SOPORTE;
@@ -197,17 +197,17 @@ class TicketReplyService
 
         try {
             $sender = $this->mailService->getSender();
-            $previousIds = TicketMensaje::where('ticket_id', $ticket->id)
+            $previousIds = TicketMensaje::where('ticket_codigo', $ticket->codigo)
                 ->where('id', '!=', $mensaje->id)
-                ->whereNotNull('correo_message_id')
+                ->whereNotNull('correo_mensaje_id')
                 ->orderBy('fecha_creacion')
                 ->orderBy('id')
-                ->pluck('correo_message_id')
+                ->pluck('correo_mensaje_id')
                 ->all();
 
             // Si la respuesta llegó por correo, el reenvío a la contraparte responde a ese correo.
-            if ($mensaje->canal_origen === self::CANAL_EMAIL && $mensaje->correo_message_id) {
-                $previousIds[] = $mensaje->correo_message_id;
+            if ($mensaje->canal_origen === self::CANAL_EMAIL && $mensaje->correo_mensaje_id) {
+                $previousIds[] = $mensaje->correo_mensaje_id;
             }
 
             $references = array_merge(array_filter([$ticket->correo_hilo]), $previousIds);
@@ -248,8 +248,8 @@ class TicketReplyService
 
         if ($result->success && $result->messageId) {
             // Un mensaje recibido por correo conserva su propio Message-ID.
-            if (empty($mensaje->correo_message_id)) {
-                $mensaje->correo_message_id = $result->messageId;
+            if (empty($mensaje->correo_mensaje_id)) {
+                $mensaje->correo_mensaje_id = $result->messageId;
                 $mensaje->save();
             }
 
@@ -264,7 +264,7 @@ class TicketReplyService
 
     protected function notifyInApp(Ticket $ticket, User $author, ?User $recipient, string $emisor): void
     {
-        if (!$recipient || (int) $recipient->id === (int) $author->id) {
+        if (!$recipient || (string) $recipient->ci === (string) $author->ci) {
             return;
         }
 
@@ -276,7 +276,7 @@ class TicketReplyService
                     ? "Soporte respondió tu ticket {$ticket->codigo}"
                     : "Nueva respuesta del solicitante en {$ticket->codigo}",
                 "{$author->name} respondió el ticket '{$ticket->asunto}'.",
-                $ticket->id,
+                $ticket->codigo,
                 ['codigo' => $ticket->codigo, 'estado' => $ticket->status]
             );
         } catch (\Throwable $e) {

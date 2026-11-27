@@ -149,12 +149,20 @@ class ConfiguracionSeeder extends Seeder
                 'grupo'       => 'notificaciones',
                 'descripcion' => 'Registrar notificación en plataforma web para tickets sin respuesta.',
             ],
+            [
+                'clave'       => 'relevamiento_permitir_saltar_niveles',
+                'valor'       => '0',
+                'tipo'        => 'boolean',
+                'grupo'       => 'relevamiento',
+                'descripcion' => 'Permite a los Técnicos relevar tickets saltando niveles de la estructura (los Administradores siempre pueden). Desactivado = relevamiento secuencial al nivel contiguo.',
+            ],
         ];
 
-        $adminId = \App\Models\User::where('id', 1)->value('id') ?? 1;
+        $adminCi = \App\Models\User::where('ci', '1000001')->value('ci')
+            ?? \App\Models\User::whereHas('rol', fn ($q) => $q->where('nombre', 'DIRECTOR'))->value('ci');
 
         foreach ($configs as $cfg) {
-            $cfg['usuario_id'] = $adminId;
+            $cfg['usuario_ci'] = $adminCi;
             Configuracion::firstOrCreate(
                 ['clave' => $cfg['clave']],
                 $cfg

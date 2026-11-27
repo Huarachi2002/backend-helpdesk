@@ -11,12 +11,16 @@ class Configuracion extends Model
 
     protected $table = 'configuraciones';
 
+    protected $primaryKey = 'clave';
+    public $incrementing = false;
+    protected $keyType = 'string';
+
     public const CREATED_AT = 'fecha_creacion';
     public const UPDATED_AT = 'fecha_actualizacion';
 
     protected $fillable = [
-        'usuario_id',
         'clave',
+        'usuario_ci',
         'valor',
         'tipo',
         'grupo',
@@ -28,12 +32,19 @@ class Configuracion extends Model
         'fecha_actualizacion' => 'datetime',
     ];
 
+    protected $appends = ['id'];
+
+    public function getIdAttribute()
+    {
+        return $this->attributes['clave'] ?? null;
+    }
+
     /**
      * Usuario Administrador (Director) responsable de la configuración.
      */
     public function usuario()
     {
-        return $this->belongsTo(User::class, 'usuario_id');
+        return $this->belongsTo(User::class, 'usuario_ci', 'ci');
     }
 
     /**
@@ -92,11 +103,9 @@ class Configuracion extends Model
 
     /**
      * Verifica si una notificación está permitida globalmente para un evento y canal específicos.
-     * La política es institucional y definida exclusivamente por el Administrador.
      */
     public static function allowsNotification(string $eventType, string $channel = 'email'): bool
     {
-        // 1. Interruptores maestros por canal
         if ($channel === 'email' || $channel === 'correo') {
             if (!self::get('notificaciones_email_activas', true)) {
                 return false;
@@ -107,7 +116,6 @@ class Configuracion extends Model
             }
         }
 
-        // 2. Mapeo del tipo de evento a la clave de configuración del sistema
         $eventMap = [
             'TICKET_CREADO'              => 'ticket_creado',
             'CAMBIO_ESTADO'              => 'cambio_estado',
@@ -118,13 +126,14 @@ class Configuracion extends Model
             'RECORDATORIO_PENDIENTE'     => 'recordatorio',
             'TICKET_SIN_RESPUESTA'       => 'sin_respuesta',
             'RESPUESTA_TICKET'           => 'respuesta_ticket',
+            'TICKET_RELEVADO'            => 'relevamiento',
+            'TICKET_DEVUELTO'            => 'relevamiento',
         ];
 
         $normalizedChannel = ($channel === 'in_app' || $channel === 'inapp') ? 'inapp' : 'email';
         $normalizedEvent = $eventMap[$eventType] ?? strtolower($eventType);
         $configKey = "notif_evento_{$normalizedEvent}_{$normalizedChannel}";
 
-        // Si la clave existe en configuraciones, respetar su valor booleano. Por defecto true.
         return (bool) self::get($configKey, true);
     }
 

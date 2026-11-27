@@ -46,7 +46,7 @@ class MetricsReportService
         $from = Carbon::parse($filters['date_from'])->startOfDay();
         $to   = Carbon::parse($filters['date_to'])->endOfDay();
         $level = $filters['level'] ?? 'general';
-        $technicianId = !empty($filters['technician_id']) ? (int) $filters['technician_id'] : null;
+        $technicianId = !empty($filters['technician_id']) ? (string) $filters['technician_id'] : null;
         $categoryId   = !empty($filters['category_id']) ? (int) $filters['category_id'] : null;
 
         $technician = $technicianId ? $this->technicians()->firstWhere('id', $technicianId) : null;
@@ -77,7 +77,7 @@ class MetricsReportService
                 'level'       => $level,
                 'level_label' => self::LEVEL_LABELS[$level],
                 'granularity' => $granularity,
-                'technician'  => $technician ? ['id' => $technician->id, 'name' => $technician->name] : null,
+                'technician'  => $technician ? ['id' => $technician->id, 'ci' => $technician->id, 'name' => $technician->name] : null,
                 'category'    => $category ? ['id' => $category->id, 'name' => $category->name] : null,
             ],
             'summary'      => $this->formatMetrics($summaryRow),
@@ -96,9 +96,10 @@ class MetricsReportService
             ->where('r.nombre', 'TECNICO')
             ->orderBy('u.nombre')
             ->orderBy('u.apellido')
-            ->get(['u.id', 'u.nombre', 'u.apellido', 'u.activo'])
+            ->get(['u.ci', 'u.nombre', 'u.apellido', 'u.activo'])
             ->map(fn ($u) => (object) [
-                'id'     => (int) $u->id,
+                'id'     => (string) $u->ci,
+                'ci'     => (string) $u->ci,
                 'name'   => trim($u->nombre . ' ' . ($u->apellido ?? '')),
                 'active' => (bool) $u->activo,
             ]);
@@ -123,15 +124,15 @@ class MetricsReportService
     // Consultas
     // ------------------------------------------------------------------
 
-    private function baseQuery(Carbon $from, Carbon $to, ?int $technicianId, ?int $categoryId): Builder
+    private function baseQuery(Carbon $from, Carbon $to, ?string $technicianId, ?int $categoryId): Builder
     {
         return DB::table('ticket as t')
             ->whereBetween('t.fecha_creacion', [$from, $to])
-            ->when($technicianId, fn ($q) => $q->where('t.tecnico_asignado_id', $technicianId))
+            ->when($technicianId, fn ($q) => $q->where('t.tecnico_asignado_ci', $technicianId))
             ->when($categoryId, fn ($q) => $q->whereExists(function ($sub) use ($categoryId) {
                 $sub->select(DB::raw(1))
                     ->from('ticket_categoria as tc_f')
-                    ->whereColumn('tc_f.ticket_id', 't.id')
+                    ->whereColumn('tc_f.ticket_codigo', 't.codigo')
                     ->where('tc_f.categoria_id', $categoryId);
             }));
     }
@@ -154,7 +155,7 @@ class MetricsReportService
         ]);
     }
 
-    private function rowsByPeriod(Carbon $from, Carbon $to, ?int $technicianId, ?int $categoryId, string $granularity): array
+    private function rowsByPeriod(Carbon $from, Carbon $to, ?string $technicianId, ?int $categoryId, string $granularity): array
     {
         $format = $granularity === 'day' ? 'YYYY-MM-DD' : 'YYYY-MM';
 
@@ -181,13 +182,13 @@ class MetricsReportService
         return $rows;
     }
 
-    private function rowsByTechnician(Carbon $from, Carbon $to, ?int $technicianId, ?int $categoryId): array
+    private function rowsByTechnician(Carbon $from, Carbon $to, ?string $technicianId, ?int $categoryId): array
     {
         $data = $this->baseQuery($from, $to, $technicianId, $categoryId)
-            ->selectRaw('t.tecnico_asignado_id as grupo, ' . $this->aggregateSelect())
-            ->groupBy('t.tecnico_asignado_id')
+            ->selectRaw('t.tecnico_asignado_ci as grupo, ' . $this->aggregateSelect())
+            ->groupBy('t.tecnico_asignado_ci')
             ->get()
-            ->keyBy(fn ($r) => $r->grupo === null ? 'none' : (int) $r->grupo);
+            ->keyBy(fn ($r) => $r->grupo === null ? 'none' : (string) $r->grupo);
 
         $technicians = $this->technicians();
         if ($technicianId) {
@@ -208,8 +209,8 @@ class MetricsReportService
             if ($key === 'none' || in_array($key, $knownIds, true)) {
                 continue;
             }
-            $user = DB::table('usuarios')->where('id', $key)->first(['nombre', 'apellido']);
-            $label = $user ? trim($user->nombre . ' ' . ($user->apellido ?? '')) . ' (otro rol)' : "Usuario #{$key}";
+            $user = DB::table('usuarios')->where('ci', $key)->first(['nombre', 'apellido']);
+            $label = $user ? trim($user->nombre . ' ' . ($user->apellido ?? '')) . ' (otro rol)' : "Usuario CI {$key}";
             $rows[] = $this->makeRow((string) $key, $label, $row);
         }
         if (!$technicianId && $data->has('none')) {
@@ -219,11 +220,11 @@ class MetricsReportService
         return $this->sortRows($rows);
     }
 
-    private function rowsByCategory(Carbon $from, Carbon $to, ?int $technicianId, ?int $categoryId): array
+    private function rowsByCategory(Carbon $from, Carbon $to, ?string $technicianId, ?int $categoryId): array
     {
         // Un ticket con varias categorías cuenta en cada una de ellas.
         $data = $this->baseQuery($from, $to, $technicianId, $categoryId)
-            ->leftJoin('ticket_categoria as tc', 'tc.ticket_id', '=', 't.id')
+            ->leftJoin('ticket_categoria as tc', 'tc.ticket_codigo', '=', 't.codigo')
             ->when($categoryId, fn ($q) => $q->where('tc.categoria_id', $categoryId))
             ->selectRaw('tc.categoria_id as grupo, ' . $this->aggregateSelect())
             ->groupBy('tc.categoria_id')

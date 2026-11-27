@@ -2,11 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Asignacion;
 use App\Models\Ticket;
-use App\Models\TicketAsignacion;
 use App\Models\TicketHistory;
 use App\Models\TicketPrioridad;
 use App\Models\User;
+use App\Models\UsuarioAsignacion;
 use Illuminate\Http\Request;
 use App\Http\Requests\StoreTicketRequest;
 use App\Http\Resources\TicketResource;
@@ -23,17 +24,16 @@ class TicketController extends Controller
         $descripcion = $validated['descripcion'] ?? $validated['description'];
         $catId = $validated['categoria_id'] ?? $validated['category_id'] ?? 1;
 
-        // Determinar prioridad
-        $prioridadId = $validated['prioridad_id'] ?? null;
-        if (!$prioridadId) {
+        // Determinar prioridad (PK natural: codigo)
+        $prioridadCodigo = $validated['prioridad_codigo'] ?? $validated['prioridad_id'] ?? null;
+        if (!$prioridadCodigo) {
             $prioridadCode = $validated['priority'] ?? 'medium';
             $pModel = TicketPrioridad::whereRaw('LOWER(codigo) = ?', [strtolower($prioridadCode)])->first();
-            $prioridadId = $pModel ? $pModel->id : 2;
+            $prioridadCodigo = $pModel ? $pModel->codigo : 'medium';
         }
 
-        // Generar código único (ej: TCK-105)
-        $nextNumber = (Ticket::max('id') ?? 0) + 1;
-        $codigo = 'TCK-' . str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
+        // Generar código único atómico vía secuencia PostgreSQL (ej: TCK-026)
+        $codigo = Ticket::generarSiguienteCodigo();
 
         DB::beginTransaction();
         try {
@@ -41,10 +41,10 @@ class TicketController extends Controller
                 'codigo'              => $codigo,
                 'asunto'              => $asunto,
                 'descripcion'         => $descripcion,
-                'solicitante_id'      => $request->user()->id,
-                'prioridad_id'        => $prioridadId,
+                'solicitante_ci'      => $request->user()->ci,
+                'prioridad_codigo'    => $prioridadCodigo,
                 'estado'              => 'EN_ESPERA',
-                'tecnico_asignado_id' => null,
+                'tecnico_asignado_ci' => null,
             ]);
 
             // Vincular categoría en tabla pivot
@@ -58,14 +58,23 @@ class TicketController extends Controller
                 : 'Ticket derivado a la cola general (sin técnicos disponibles).';
 
             if ($agent) {
-                TicketAsignacion::create([
-                    'ticket_id'           => $ticket->id,
-                    'tecnico_id'          => $agent->id,
-                    'activo'              => true,
-                    'solicitud_pendiente' => false,
-                    'motivo'              => $motivo,
-                    'fecha_inicio'        => now(),
+                $now = now();
+                $asignacionInicial = Asignacion::create([
+                    'ticket_codigo'        => $ticket->codigo,
+                    'estado'               => Asignacion::ESTADO_APROBADA,
+                    'tipo_origen'          => Asignacion::TIPO_AUTOMATICA,
+                    'motivo_solicitud'     => $motivo,
+                    'motivo_resolucion'    => null,
+                    'cargo_origen_codigo'  => null,
+                    'cargo_destino_codigo' => $agent->cargo_codigo,
+                    'fecha_creacion'       => $now,
+                    'fecha_resolucion'     => $now,
                 ]);
+                $asignacionInicial->registrarParticipante(
+                    $agent->ci,
+                    UsuarioAsignacion::ROL_TECNICO_DESTINO,
+                    $now
+                );
             }
 
             $comments = $agent
@@ -75,11 +84,11 @@ class TicketController extends Controller
                 : "Ticket derivado a la cola general (sin técnicos disponibles).";
 
             TicketHistory::create([
-                'ticket_id'  => $ticket->id,
-                'changed_by' => $request->user()->id,
-                'old_status' => null,
-                'new_status' => 'open',
-                'comments'   => $comments
+                'ticket_codigo'   => $ticket->codigo,
+                'usuario_ci'      => $request->user()->ci,
+                'estado_anterior' => null,
+                'estado_nuevo'    => 'open',
+                'comentarios'     => $comments,
             ]);
 
             DB::commit();
@@ -111,8 +120,10 @@ class TicketController extends Controller
             'categorias',
             'prioridad',
             'assignee.rol',
+            'assignee.cargo',
             'creator.rol',
-            'solicitudReasignacionPendiente.tecnico.rol',
+            'solicitudReasignacionPendiente.participantes.usuario.rol',
+            'solicitudReasignacionPendiente.participantes.usuario.cargo',
         ]);
 
         // Filtro por Estado (acepta tanto 'open' como 'EN_ESPERA')
@@ -142,8 +153,17 @@ class TicketController extends Controller
             $q->whereHas('categorias', fn($sub) => $sub->where('categorias.id', $category_id));
         });
 
-        // Filtro por Técnico Asignado
-        $query->when($request->assigned_to, fn($q, $assigned_to) => $q->where('tecnico_asignado_id', $assigned_to));
+        // Filtro por Técnico Asignado (CI)
+        $query->when($request->assigned_to, fn($q, $assigned_to) => $q->where('tecnico_asignado_ci', $assigned_to));
+
+        // Relevamiento: tickets que llegaron al usuario actual por relevamiento o devolución
+        if ($request->boolean('relevados_a_mi') && $request->user()) {
+            $query->where('tecnico_asignado_ci', $request->user()->ci)
+                ->whereHas('asignacionActiva', fn($q) => $q->whereIn('tipo_origen', Asignacion::TIPOS_VERTICALES));
+        }
+
+        // Relevamiento: nivel actual del ticket (nivel del cargo del responsable)
+        $query->when($request->nivel, fn($q, $nivel) => $q->whereHas('assignee.cargo', fn($c) => $c->where('nivel', (int) $nivel)));
 
         // Filtros de fecha
         $query->when($request->date_from, fn($q, $date_from) => $q->whereDate('fecha_creacion', '>=', $date_from))
@@ -170,10 +190,15 @@ class TicketController extends Controller
             'categorias',
             'prioridad',
             'assignee.rol',
+            'assignee.cargo',
             'creator.rol',
             'history.changer.rol',
-            'solicitudReasignacionPendiente.tecnico.rol',
-            'asignaciones.tecnico.rol',
+            'solicitudReasignacionPendiente.participantes.usuario.rol',
+            'solicitudReasignacionPendiente.participantes.usuario.cargo',
+            'asignaciones.participantes.usuario.rol',
+            'asignaciones.participantes.usuario.cargo',
+            'asignaciones.cargoOrigen',
+            'asignaciones.cargoDestino',
             'mensajes.usuario.rol',
         ])->findOrFail($id);
 
@@ -231,12 +256,21 @@ class TicketController extends Controller
      */
     public function eligibleAgents($id, TicketAssignmentService $assignmentService)
     {
-        $ticket = Ticket::with(['categorias', 'prioridad'])->findOrFail($id);
+        $ticket = Ticket::with(['categorias', 'prioridad', 'assignee.cargo'])->findOrFail($id);
         $eligible = $assignmentService->getEligibleAgentsWithScores($ticket);
+
+        // Reasignación horizontal: solo candidatos del mismo nivel del ticket
+        $escalation = app(\App\Services\TicketEscalationService::class);
+        $nivelTicket = $escalation->currentCargo($ticket)?->nivel;
+        if ($nivelTicket !== null) {
+            $eligible->loadMissing('cargo');
+            $eligible = $eligible->filter(fn ($a) => $a->cargo && (int) $a->cargo->nivel === (int) $nivelTicket)->values();
+        }
 
         $data = $eligible->map(function ($agent) use ($ticket) {
             return [
-                'id'                     => $agent->id,
+                'id'                     => $agent->ci,
+                'ci'                     => $agent->ci,
                 'name'                   => $agent->name,
                 'nombre'                 => $agent->nombre,
                 'apellido'               => $agent->apellido,
@@ -247,7 +281,7 @@ class TicketController extends Controller
                 'tier_level'             => 2,
                 'max_active_tickets'     => 10,
                 'assigned_tickets_count' => $agent->assigned_tickets_count,
-                'is_current_assignee'    => ($agent->id === $ticket->tecnico_asignado_id),
+                'is_current_assignee'    => ($agent->ci === $ticket->tecnico_asignado_ci),
                 'allowed_priorities'     => $agent->prioridades->pluck('codigo')->map(fn($c) => strtolower($c))->toArray(),
                 'categories'             => $agent->categorias->map(fn($c) => [
                     'id'   => $c->id,
@@ -274,6 +308,25 @@ class TicketController extends Controller
     /**
      * Helper para comprobar si un usuario posee rol de Administrador / Director.
      */
+    /**
+     * Aprobación jerárquica (D5): solo la cadena superior del técnico solicitante puede
+     * aprobar o rechazar su solicitud de reasignación. Devuelve una respuesta 403 si no puede.
+     */
+    private function denyIfCannotResolve($user, Asignacion $solicitud, Ticket $ticket, string $accion)
+    {
+        $approval = app(\App\Services\ReassignmentApprovalService::class);
+        if ($user && $approval->canResolve($user, $solicitud, $ticket)) {
+            return null;
+        }
+
+        $nombres = $approval->approvers($solicitud, $ticket)->pluck('name')->join(', ', ' o ');
+
+        return response()->json([
+            'message' => "Solo el superior jerárquico del técnico solicitante puede {$accion} esta solicitud" . ($nombres ? ": {$nombres}." : '.'),
+            'error'   => 'not_reassignment_approver',
+        ], 403);
+    }
+
     private function isUserAdmin($user): bool
     {
         if (!$user) return false;
@@ -282,13 +335,26 @@ class TicketController extends Controller
     }
 
     /**
+     * Verifica si el ticket se encuentra en un estado final (Resuelto o Cerrado)
+     * donde ya no se permiten reasignaciones.
+     */
+    private function isTicketClosedOrResolved(Ticket $ticket): bool
+    {
+        $estado = strtoupper((string) ($ticket->estado ?? ''));
+        $status = strtolower((string) ($ticket->status ?? ''));
+
+        return in_array($estado, ['RESUELTO', 'CERRADO'], true)
+            || in_array($status, ['resolved', 'closed'], true);
+    }
+
+    /**
      * Reasigna el ticket (si es Administrador/Director) o registra una solicitud de reasignación
-     * (si es Técnico de Soporte) para ser autorizada por la Dirección.
+     * (si es Técnico de Soporte) para ser autorizada por la Dirección / cadena superior.
      */
     public function reassign(Request $request, $id, TicketAssignmentService $assignmentService)
     {
         $request->validate([
-            'assigned_to' => 'required|exists:usuarios,id',
+            'assigned_to' => 'required|string|exists:usuarios,ci',
             'comments'    => 'nullable|string',
             'motivo'      => 'nullable|string',
         ], [
@@ -296,8 +362,21 @@ class TicketController extends Controller
             'assigned_to.exists'   => 'El usuario seleccionado no existe en el sistema.',
         ]);
 
-        $ticket = Ticket::with(['categorias', 'prioridad', 'assignee', 'solicitudReasignacionPendiente'])->findOrFail($id);
-        $newAgent = User::with(['categorias', 'prioridades', 'rol'])->findOrFail($request->assigned_to);
+        $ticket = Ticket::with([
+            'categorias',
+            'prioridad',
+            'assignee.cargo',
+            'solicitudReasignacionPendiente.participantes',
+        ])->findOrFail($id);
+
+        if ($this->isTicketClosedOrResolved($ticket)) {
+            return response()->json([
+                'message' => 'No se puede reasignar un ticket que se encuentra en estado Resuelto o Cerrado.',
+                'error'   => 'ticket_closed_or_resolved',
+            ], 422);
+        }
+
+        $newAgent = User::with(['categorias', 'prioridades', 'rol', 'cargo'])->findOrFail($request->assigned_to);
 
         // Validar elegibilidad del nuevo técnico seleccionado
         $validation = $assignmentService->validateEligibility($newAgent, $ticket);
@@ -305,6 +384,14 @@ class TicketController extends Controller
             return response()->json([
                 'message' => $validation['reason'],
                 'error'   => 'ineligible_agent',
+            ], 422);
+        }
+
+        // La reasignación es horizontal: solo dentro del nivel donde está el ticket
+        if ($levelError = app(\App\Services\TicketEscalationService::class)->reassignmentLevelError($ticket, $newAgent)) {
+            return response()->json([
+                'message' => $levelError,
+                'error'   => 'reassign_other_level',
             ], 422);
         }
 
@@ -317,53 +404,74 @@ class TicketController extends Controller
             $oldAssignee = $ticket->assignee;
             $oldAssigneeName = $oldAssignee ? $oldAssignee->name : 'Sin asignar';
 
-            // Si existía una solicitud pendiente para este ticket, se cierra/actualiza
-            if ($ticket->solicitudReasignacionPendiente) {
-                $ticket->solicitudReasignacionPendiente->update([
-                    'activo'              => false,
-                    'solicitud_pendiente' => false,
-                    'motivo_resolucion'   => $motivo ?: 'Reasignación ejecutada directamente por el Administrador / Director.',
-                    'fecha_fin'           => now(),
+            DB::transaction(function () use ($ticket, $user, $oldAssignee, $newAgent, $motivo) {
+                $now = now();
+
+                // Si existía una solicitud pendiente para este ticket, se marca RECHAZADA por intervención directa
+                if ($ticket->solicitudReasignacionPendiente) {
+                    $pendiente = $ticket->solicitudReasignacionPendiente;
+                    $pendiente->update([
+                        'estado'            => Asignacion::ESTADO_RECHAZADA,
+                        'motivo_resolucion' => $motivo ?: 'Reasignación ejecutada directamente por el Administrador / Director.',
+                        'fecha_resolucion'  => $now,
+                    ]);
+
+                    $rolCierre = ($user->ci === $pendiente->tecnicoDestinoCi())
+                        ? UsuarioAsignacion::ROL_DESTINO_RECHAZADOR
+                        : UsuarioAsignacion::ROL_RECHAZADOR;
+                    $pendiente->registrarParticipante($user->ci, $rolCierre, $now);
+                }
+
+                // Registrar la nueva operación de reasignación directa en `asignacion` + `usuario_asignacion`
+                $nueva = Asignacion::create([
+                    'ticket_codigo'        => $ticket->codigo,
+                    'estado'               => Asignacion::ESTADO_APROBADA,
+                    'tipo_origen'          => Asignacion::TIPO_REASIGNACION_DIRECTA,
+                    'motivo_solicitud'     => $motivo ?: 'Reasignación directa por Dirección.',
+                    'motivo_resolucion'    => $motivo ?: 'Reasignación directa por Dirección.',
+                    'cargo_origen_codigo'  => $oldAssignee?->cargo_codigo,
+                    'cargo_destino_codigo' => $newAgent->cargo_codigo,
+                    'fecha_creacion'       => $now,
+                    'fecha_resolucion'     => $now,
                 ]);
-            }
 
-            // Desactivar el técnico anterior en el historial de asignaciones
-            TicketAsignacion::where('ticket_id', $ticket->id)
-                ->where('activo', true)
-                ->update([
-                    'activo'    => false,
-                    'fecha_fin' => now(),
-                ]);
+                // Participantes respetando PK compuesta (asignacion_id, usuario_ci)
+                if ($user->ci === $newAgent->ci) {
+                    $nueva->registrarParticipante($user->ci, UsuarioAsignacion::ROL_DESTINO_APROBADOR, $now);
+                } else {
+                    $nueva->registrarParticipante($user->ci, UsuarioAsignacion::ROL_APROBADOR, $now);
+                    $nueva->registrarParticipante($newAgent->ci, UsuarioAsignacion::ROL_TECNICO_DESTINO, $now);
+                }
 
-            // Registrar la nueva asignación activa
-            TicketAsignacion::create([
-                'ticket_id'           => $ticket->id,
-                'tecnico_id'          => $newAgent->id,
-                'activo'              => true,
-                'solicitud_pendiente' => false,
-                'motivo'              => $motivo ?: 'Reasignación directa por Dirección.',
-                'fecha_inicio'        => now(),
-            ]);
+                if ($oldAssignee && $oldAssignee->ci !== $user->ci && $oldAssignee->ci !== $newAgent->ci) {
+                    $nueva->registrarParticipante($oldAssignee->ci, UsuarioAsignacion::ROL_TECNICO_ORIGEN, $now);
+                }
 
-            $ticket->tecnico_asignado_id = $newAgent->id;
-            $ticket->save();
+                $ticket->tecnico_asignado_ci = $newAgent->ci;
+                $ticket->save();
+                app(\App\Services\TicketEscalationService::class)->recalcularNivelRelevamiento($ticket->fresh(), $newAgent->cargo);
+            });
 
             $auditComment = $motivo
                 ? "Reasignación directa por Dirección: {$motivo}"
                 : "Ticket reasignado directamente por la Dirección de {$oldAssigneeName} a {$newAgent->name} ({$newAgent->email}).";
 
             TicketHistory::create([
-                'ticket_id'  => $ticket->id,
-                'changed_by' => $user->id,
-                'old_status' => $ticket->status,
-                'new_status' => $ticket->status,
-                'comments'   => $auditComment,
+                'ticket_codigo'   => $ticket->codigo,
+                'usuario_ci'      => $user->ci,
+                'estado_anterior' => $ticket->status,
+                'estado_nuevo'    => $ticket->status,
+                'comentarios'     => $auditComment,
             ]);
 
-            $ticket->load([
-                'categorias', 'prioridad', 'assignee', 'creator', 'history.changer',
-                'solicitudReasignacionPendiente.tecnico',
-                'asignaciones.tecnico',
+            $ticket->refresh()->load([
+                'categorias', 'prioridad', 'assignee.rol', 'assignee.cargo', 'creator.rol', 'history.changer.rol',
+                'solicitudReasignacionPendiente.participantes.usuario.rol',
+                'solicitudReasignacionPendiente.participantes.usuario.cargo',
+                'asignaciones.participantes.usuario.rol',
+                'asignaciones.participantes.usuario.cargo',
+                'asignaciones.cargoOrigen',
+                'asignaciones.cargoDestino',
             ]);
 
             return response()->json([
@@ -381,6 +489,13 @@ class TicketController extends Controller
             ], 422);
         }
 
+        if ($newAgent->ci === $user->ci) {
+            return response()->json([
+                'message' => 'No puedes solicitar una reasignación hacia ti mismo.',
+                'error'   => 'same_requester_and_target',
+            ], 422);
+        }
+
         if (empty($motivo)) {
             return response()->json([
                 'message' => 'Debes ingresar un motivo o justificación técnica para la solicitud de reasignación.',
@@ -388,14 +503,31 @@ class TicketController extends Controller
             ], 422);
         }
 
-        $solicitud = TicketAsignacion::create([
-            'ticket_id'           => $ticket->id,
-            'tecnico_id'          => $newAgent->id,
-            'activo'              => false,
-            'solicitud_pendiente' => true,
-            'motivo'              => $motivo,
-            'fecha_inicio'        => now(),
-        ]);
+        $solicitud = DB::transaction(function () use ($ticket, $user, $newAgent, $motivo) {
+            $now = now();
+            $actual = $ticket->assignee;
+
+            $solicitud = Asignacion::create([
+                'ticket_codigo'        => $ticket->codigo,
+                'estado'               => Asignacion::ESTADO_PENDIENTE,
+                'tipo_origen'          => Asignacion::TIPO_SOLICITUD_REASIGNACION,
+                'motivo_solicitud'     => $motivo,
+                'motivo_resolucion'    => null,
+                'cargo_origen_codigo'  => $actual?->cargo_codigo ?? $user->cargo_codigo,
+                'cargo_destino_codigo' => $newAgent->cargo_codigo,
+                'fecha_creacion'       => $now,
+                'fecha_resolucion'     => null,
+            ]);
+
+            $solicitud->registrarParticipante($user->ci, UsuarioAsignacion::ROL_SOLICITANTE, $now);
+            $solicitud->registrarParticipante($newAgent->ci, UsuarioAsignacion::ROL_TECNICO_DESTINO, $now);
+
+            if ($actual && $actual->ci !== $user->ci && $actual->ci !== $newAgent->ci) {
+                $solicitud->registrarParticipante($actual->ci, UsuarioAsignacion::ROL_TECNICO_ORIGEN, $now);
+            }
+
+            return $solicitud;
+        });
 
         try {
             app(\App\Services\NotificationService::class)->notifyReassignmentRequested($ticket, $solicitud);
@@ -404,21 +536,25 @@ class TicketController extends Controller
         }
 
         TicketHistory::create([
-            'ticket_id'  => $ticket->id,
-            'changed_by' => $user->id,
-            'old_status' => $ticket->status,
-            'new_status' => $ticket->status,
-            'comments'   => "Solicitud de reasignación enviada por {$user->name} para derivar a {$newAgent->name}. Motivo: {$motivo}",
+            'ticket_codigo'   => $ticket->codigo,
+            'usuario_ci'      => $user->ci,
+            'estado_anterior' => $ticket->status,
+            'estado_nuevo'    => $ticket->status,
+            'comentarios'     => "Solicitud de reasignación enviada por {$user->name} para derivar a {$newAgent->name}. Motivo: {$motivo}",
         ]);
 
-        $ticket->load([
-            'categorias', 'prioridad', 'assignee', 'creator', 'history.changer',
-            'solicitudReasignacionPendiente.tecnico',
-            'asignaciones.tecnico',
+        $ticket->refresh()->load([
+            'categorias', 'prioridad', 'assignee.rol', 'assignee.cargo', 'creator.rol', 'history.changer.rol',
+            'solicitudReasignacionPendiente.participantes.usuario.rol',
+            'solicitudReasignacionPendiente.participantes.usuario.cargo',
+            'asignaciones.participantes.usuario.rol',
+            'asignaciones.participantes.usuario.cargo',
+            'asignaciones.cargoOrigen',
+            'asignaciones.cargoDestino',
         ]);
 
         return response()->json([
-            'message'      => "Solicitud de reasignación enviada con éxito. Pendiente de aprobación por el Administrador (Director).",
+            'message'      => "Solicitud de reasignación enviada con éxito. Pendiente de aprobación por la cadena superior / Dirección.",
             'action_type'  => 'reassignment_requested',
             'solicitud_id' => $solicitud->id,
             'data'         => new TicketResource($ticket)
@@ -426,23 +562,39 @@ class TicketController extends Controller
     }
 
     /**
-     * Aprueba una solicitud de reasignación pendiente (Exclusivo Administrador / Director).
+     * Aprueba una solicitud de reasignación pendiente (Superior jerárquico / Director).
      */
     public function approveReassignment(Request $request, $id, $requestId, TicketAssignmentService $assignmentService)
     {
         $user = $request->user();
-        if (!$this->isUserAdmin($user)) {
-            return response()->json([
-                'message' => 'Solo el Administrador (Director) tiene permisos para autorizar la reasignación de tickets.'
-            ], 403);
-        }
 
-        $ticket = Ticket::with(['categorias', 'prioridad', 'assignee'])->findOrFail($id);
-        $reassignment = TicketAsignacion::where('ticket_id', $ticket->id)
-            ->where('solicitud_pendiente', true)
+        $ticket = Ticket::with(['categorias', 'prioridad', 'assignee.cargo'])->findOrFail($id);
+        $reassignment = Asignacion::with(['participantes.usuario.rol', 'participantes.usuario.cargo'])
+            ->where('ticket_codigo', $ticket->codigo)
+            ->where('estado', Asignacion::ESTADO_PENDIENTE)
             ->findOrFail($requestId);
 
-        $newAgent = User::with(['categorias', 'prioridades', 'rol'])->findOrFail($reassignment->tecnico_id);
+        // Aprobación jerárquica (D5): solo la cadena superior del técnico solicitante
+        if ($denied = $this->denyIfCannotResolve($user, $reassignment, $ticket, 'aprobar')) {
+            return $denied;
+        }
+
+        if ($this->isTicketClosedOrResolved($ticket)) {
+            return response()->json([
+                'message' => 'No se puede aprobar la reasignación porque el ticket se encuentra en estado Resuelto o Cerrado.',
+                'error'   => 'ticket_closed_or_resolved',
+            ], 422);
+        }
+
+        $newAgentCi = $reassignment->tecnicoDestinoCi();
+        if (!$newAgentCi) {
+            return response()->json([
+                'message' => 'La solicitud de reasignación no tiene un técnico destino válido.',
+                'error'   => 'missing_target_agent',
+            ], 422);
+        }
+
+        $newAgent = User::with(['categorias', 'prioridades', 'rol', 'cargo'])->findOrFail($newAgentCi);
         $validation = $assignmentService->validateEligibility($newAgent, $ticket);
         if (!$validation['eligible']) {
             return response()->json([
@@ -451,46 +603,59 @@ class TicketController extends Controller
             ], 422);
         }
 
+        // Si el ticket cambió de nivel (relevamiento) mientras la solicitud estaba pendiente, ya no aplica
+        if ($levelError = app(\App\Services\TicketEscalationService::class)->reassignmentLevelError($ticket, $newAgent)) {
+            return response()->json([
+                'message' => $levelError,
+                'error'   => 'reassign_other_level',
+            ], 422);
+        }
+
         $oldAssigneeName = $ticket->assignee ? $ticket->assignee->name : 'Sin asignar';
         $comments = trim($request->comments ?? $request->motivo ?? '');
 
-        // 1. Desactivar la asignación anterior
-        TicketAsignacion::where('ticket_id', $ticket->id)
-            ->where('activo', true)
-            ->update([
-                'activo'    => false,
-                'fecha_fin' => now(),
+        DB::transaction(function () use ($ticket, $reassignment, $newAgent, $user, $comments) {
+            $now = now();
+
+            $reassignment->update([
+                'estado'               => Asignacion::ESTADO_APROBADA,
+                'motivo_resolucion'    => $comments ?: 'Reasignación autorizada y aprobada por la Dirección.',
+                'cargo_destino_codigo' => $newAgent->cargo_codigo,
+                'fecha_resolucion'     => $now,
             ]);
 
-        // 2. Activar la asignación aprobada
-        $reassignment->update([
-            'activo'              => true,
-            'solicitud_pendiente' => false,
-            'fecha_inicio'        => now(),
-            'motivo_resolucion'   => $comments ?: 'Reasignación autorizada y aprobada por la Dirección.',
-        ]);
+            $rolAprobador = ($user->ci === $newAgent->ci)
+                ? UsuarioAsignacion::ROL_DESTINO_APROBADOR
+                : UsuarioAsignacion::ROL_APROBADOR;
+            $reassignment->registrarParticipante($user->ci, $rolAprobador, $now);
 
-        $ticket->tecnico_asignado_id = $newAgent->id;
-        $ticket->save();
+            $ticket->tecnico_asignado_ci = $newAgent->ci;
+            $ticket->save();
+            app(\App\Services\TicketEscalationService::class)->recalcularNivelRelevamiento($ticket->fresh(), $newAgent->cargo);
+        });
 
         TicketHistory::create([
-            'ticket_id'  => $ticket->id,
-            'changed_by' => $user->id,
-            'old_status' => $ticket->status,
-            'new_status' => $ticket->status,
-            'comments'   => "Reasignación aprobada por el Administrador ({$user->name}). Ticket reasignado de {$oldAssigneeName} a {$newAgent->name}." . ($comments ? " Nota: {$comments}" : ''),
+            'ticket_codigo'   => $ticket->codigo,
+            'usuario_ci'      => $user->ci,
+            'estado_anterior' => $ticket->status,
+            'estado_nuevo'    => $ticket->status,
+            'comentarios'     => "Reasignación aprobada por {$user->name}" . ($user->cargo ? " ({$user->cargo->nombre})" : '') . ". Ticket reasignado de {$oldAssigneeName} a {$newAgent->name}." . ($comments ? " Nota: {$comments}" : ''),
         ]);
 
         try {
-            app(\App\Services\NotificationService::class)->notifyReassignmentApproved($ticket, $reassignment, $newAgent, $user);
+            app(\App\Services\NotificationService::class)->notifyReassignmentApproved($ticket, $reassignment->fresh(), $newAgent, $user);
         } catch (\Throwable $ne) {
             \Log::warning("Error al emitir notificación de aprobación de reasignación: " . $ne->getMessage());
         }
 
-        $ticket->load([
-            'categorias', 'prioridad', 'assignee', 'creator', 'history.changer',
-            'solicitudReasignacionPendiente.tecnico',
-            'asignaciones.tecnico',
+        $ticket->refresh()->load([
+            'categorias', 'prioridad', 'assignee.rol', 'assignee.cargo', 'creator.rol', 'history.changer.rol',
+            'solicitudReasignacionPendiente.participantes.usuario.rol',
+            'solicitudReasignacionPendiente.participantes.usuario.cargo',
+            'asignaciones.participantes.usuario.rol',
+            'asignaciones.participantes.usuario.cargo',
+            'asignaciones.cargoOrigen',
+            'asignaciones.cargoDestino',
         ]);
 
         return response()->json([
@@ -500,51 +665,65 @@ class TicketController extends Controller
     }
 
     /**
-     * Rechaza una solicitud de reasignación pendiente (Exclusivo Administrador / Director).
+     * Rechaza una solicitud de reasignación pendiente (Superior jerárquico / Director).
      */
     public function rejectReassignment(Request $request, $id, $requestId)
     {
         $user = $request->user();
-        if (!$this->isUserAdmin($user)) {
-            return response()->json([
-                'message' => 'Solo el Administrador (Director) tiene permisos para rechazar la solicitud de reasignación.'
-            ], 403);
-        }
 
         $ticket = Ticket::with(['categorias', 'prioridad', 'assignee'])->findOrFail($id);
-        $reassignment = TicketAsignacion::where('ticket_id', $ticket->id)
-            ->where('solicitud_pendiente', true)
+        $reassignment = Asignacion::with(['participantes.usuario.rol', 'participantes.usuario.cargo'])
+            ->where('ticket_codigo', $ticket->codigo)
+            ->where('estado', Asignacion::ESTADO_PENDIENTE)
             ->findOrFail($requestId);
 
+        // Aprobación jerárquica (D5): solo la cadena superior del técnico solicitante
+        if ($denied = $this->denyIfCannotResolve($user, $reassignment, $ticket, 'rechazar')) {
+            return $denied;
+        }
+
+        $solicitante = $reassignment->solicitante() ?? $ticket->assignee;
         $motivoRechazo = trim($request->comments ?? $request->motivo ?? $request->reason ?? 'Solicitud denegada por la Dirección.');
 
-        $reassignment->update([
-            'activo'              => false,
-            'solicitud_pendiente' => false,
-            'fecha_fin'           => now(),
-            'motivo_resolucion'   => $motivoRechazo,
-        ]);
+        DB::transaction(function () use ($reassignment, $user, $motivoRechazo) {
+            $now = now();
+
+            $reassignment->update([
+                'estado'            => Asignacion::ESTADO_RECHAZADA,
+                'motivo_resolucion' => $motivoRechazo,
+                'fecha_resolucion'  => $now,
+            ]);
+
+            $rolRechazador = ($user->ci === $reassignment->tecnicoDestinoCi())
+                ? UsuarioAsignacion::ROL_DESTINO_RECHAZADOR
+                : UsuarioAsignacion::ROL_RECHAZADOR;
+            $reassignment->registrarParticipante($user->ci, $rolRechazador, $now);
+        });
 
         TicketHistory::create([
-            'ticket_id'  => $ticket->id,
-            'changed_by' => $user->id,
-            'old_status' => $ticket->status,
-            'new_status' => $ticket->status,
-            'comments'   => "Solicitud de reasignación rechazada por la Dirección ({$user->name}). Motivo: {$motivoRechazo}",
+            'ticket_codigo'   => $ticket->codigo,
+            'usuario_ci'      => $user->ci,
+            'estado_anterior' => $ticket->status,
+            'estado_nuevo'    => $ticket->status,
+            'comentarios'     => "Solicitud de reasignación rechazada por {$user->name}" . ($user->cargo ? " ({$user->cargo->nombre})" : '') . ". Motivo: {$motivoRechazo}",
         ]);
 
         try {
-            if ($ticket->assignee) {
-                app(\App\Services\NotificationService::class)->notifyReassignmentRejected($ticket, $reassignment, $ticket->assignee, $user);
+            if ($solicitante) {
+                app(\App\Services\NotificationService::class)->notifyReassignmentRejected($ticket, $reassignment->fresh(), $solicitante, $user);
             }
         } catch (\Throwable $ne) {
             \Log::warning("Error al emitir notificación de rechazo de reasignación: " . $ne->getMessage());
         }
 
-        $ticket->load([
-            'categorias', 'prioridad', 'assignee', 'creator', 'history.changer',
-            'solicitudReasignacionPendiente.tecnico',
-            'asignaciones.tecnico',
+        $ticket->refresh()->load([
+            'categorias', 'prioridad', 'assignee.rol', 'assignee.cargo', 'creator.rol', 'history.changer.rol',
+            'solicitudReasignacionPendiente.participantes.usuario.rol',
+            'solicitudReasignacionPendiente.participantes.usuario.cargo',
+            'asignaciones.participantes.usuario.rol',
+            'asignaciones.participantes.usuario.cargo',
+            'asignaciones.cargoOrigen',
+            'asignaciones.cargoDestino',
         ]);
 
         return response()->json([
@@ -554,40 +733,48 @@ class TicketController extends Controller
     }
 
     /**
-     * Lista todas las solicitudes de reasignación pendientes para el panel administrativo.
+     * Lista todas las solicitudes de reasignación pendientes para el panel administrativo / superiores.
      */
     public function pendingReassignments(Request $request)
     {
         $user = $request->user();
-        if (!$this->isUserAdmin($user)) {
-            return response()->json([
-                'message' => 'Acceso exclusivo para el Administrador / Director.'
-            ], 403);
-        }
+        $approval = app(\App\Services\ReassignmentApprovalService::class);
 
-        $pending = TicketAsignacion::with([
+        // Aprobación jerárquica (D5): solo las solicitudes que este usuario puede resolver
+        $pending = Asignacion::with([
             'ticket.prioridad',
             'ticket.categorias',
             'ticket.assignee',
-            'tecnico'
+            'participantes.usuario.rol',
+            'participantes.usuario.cargo',
         ])
-        ->where('solicitud_pendiente', true)
-        ->orderBy('fecha_inicio', 'desc')
-        ->get();
+        ->where('estado', Asignacion::ESTADO_PENDIENTE)
+        ->orderBy('fecha_creacion', 'desc')
+        ->get()
+        ->filter(fn ($p) => $user && $p->ticket && $approval->canResolve($user, $p, $p->ticket))
+        ->values();
 
-        $formatted = $pending->map(function ($p) {
+        $formatted = $pending->map(function ($p) use ($approval) {
+            $solicitante = $p->solicitante() ?? $p->ticket?->assignee;
+            $propuesto = $p->tecnicoDestino();
+            $anterior = $p->tecnicoOrigen() ?? $p->ticket?->assignee;
+
             return [
+                'aprobadores'          => $approval->approversSummary($approval->approvers($p, $p->ticket)),
                 'id'                   => $p->id,
-                'ticket_id'            => $p->ticket_id,
-                'motivo'               => $p->motivo,
-                'fecha_solicitud'      => ($p->fecha_inicio ?? $p->created_at)?->toIso8601String(),
-                'estado'               => 'PENDIENTE',
+                'ticket_id'            => $p->ticket_codigo,
+                'ticket_codigo'        => $p->ticket_codigo,
+                'motivo'               => $p->motivo_solicitud,
+                'motivo_solicitud'     => $p->motivo_solicitud,
+                'fecha_solicitud'      => $p->fecha_creacion?->toIso8601String(),
+                'estado'               => $p->estado,
+                'tipo_origen'          => $p->tipo_origen,
                 'ticket'               => $p->ticket,
-                'tecnico_propuesto'    => $p->tecnico,
-                'tecnicoPropuesto'     => $p->tecnico,
-                'tecnico_anterior'     => $p->ticket?->assignee,
-                'tecnicoAnterior'      => $p->ticket?->assignee,
-                'solicitante'          => $p->ticket?->assignee,
+                'tecnico_propuesto'    => $propuesto,
+                'tecnicoPropuesto'     => $propuesto,
+                'tecnico_anterior'     => $anterior,
+                'tecnicoAnterior'      => $anterior,
+                'solicitante'          => $solicitante,
             ];
         });
 

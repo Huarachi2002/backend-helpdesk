@@ -78,14 +78,14 @@ abstract class TicketState
             $this->ticket->save();
 
             // Registrar en el historial de auditoría
-            $userId = $user?->id ?? auth()->id() ?? $this->ticket->created_by;
+            $userCi = $user?->ci ?? auth()->id() ?? $this->ticket->solicitante_ci;
 
             TicketHistory::create([
-                'ticket_id'  => $this->ticket->id,
-                'changed_by' => $userId,
-                'old_status' => $oldStatus,
-                'new_status' => $newStatus,
-                'comments'   => $comments ?? "Transición de '{$this->label()}' a '{$targetState->label()}'.",
+                'ticket_codigo'   => $this->ticket->codigo,
+                'usuario_ci'      => $userCi,
+                'estado_anterior' => $oldStatus,
+                'estado_nuevo'    => $newStatus,
+                'comentarios'     => $comments ?? "Transición de '{$this->label()}' a '{$targetState->label()}'.",
             ]);
 
             return $this->ticket;

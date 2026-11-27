@@ -58,10 +58,10 @@ class EnviarRecordatorioTicketsCommand extends Command
 
         if ($ticketsPendientes->isNotEmpty()) {
             // Agrupar por técnico asignado
-            $ticketsPorTecnico = $ticketsPendientes->groupBy('tecnico_asignado_id');
+            $ticketsPorTecnico = $ticketsPendientes->groupBy('tecnico_asignado_ci');
 
-            foreach ($ticketsPorTecnico as $tecnicoId => $tickets) {
-                if ($tecnicoId && $tecnico = User::find($tecnicoId)) {
+            foreach ($ticketsPorTecnico as $tecnicoCi => $tickets) {
+                if ($tecnicoCi && $tecnico = User::find($tecnicoCi)) {
                     $this->info("Notificando al técnico {$tecnico->name} ({$tickets->count()} tickets pendientes)");
 
                     // Notificación In-App en la plataforma
@@ -70,7 +70,7 @@ class EnviarRecordatorioTicketsCommand extends Command
                         Notificacion::TIPO_RECORDATORIO_PENDIENTE,
                         "Recordatorio: Tienes {$tickets->count()} tickets pendientes",
                         "Existen tickets asignados a tu cuenta que no presentan actividad desde hace más de {$horasPendiente} horas.",
-                        $tickets->first()->id,
+                        $tickets->first()->codigo,
                         ['total_pendientes' => $tickets->count(), 'horas_limite' => $horasPendiente]
                     );
 
@@ -87,7 +87,7 @@ class EnviarRecordatorioTicketsCommand extends Command
 
             // Notificar a los administradores sobre tickets sin asignar o panorama general
             $admins = $notificationService->getAdmins();
-            $ticketsSinAsignar = $ticketsPendientes->whereNull('tecnico_asignado_id');
+            $ticketsSinAsignar = $ticketsPendientes->whereNull('tecnico_asignado_ci');
 
             foreach ($admins as $admin) {
                 $this->info("Enviando reporte general a administrador {$admin->name}");
@@ -97,7 +97,7 @@ class EnviarRecordatorioTicketsCommand extends Command
                     Notificacion::TIPO_RECORDATORIO_PENDIENTE,
                     "Resumen de Mesa de Ayuda: {$ticketsPendientes->count()} tickets pendientes",
                     "Hay {$ticketsPendientes->count()} tickets pendientes de atención (incluyendo {$ticketsSinAsignar->count()} sin técnico asignado).",
-                    $ticketsPendientes->first()->id,
+                    $ticketsPendientes->first()->codigo,
                     ['total' => $ticketsPendientes->count(), 'sin_asignar' => $ticketsSinAsignar->count()]
                 );
 

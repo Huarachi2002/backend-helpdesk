@@ -2,10 +2,10 @@
 
 namespace App\Services;
 
+use App\Models\Asignacion;
 use App\Models\Configuracion;
 use App\Models\Notificacion;
 use App\Models\Ticket;
-use App\Models\TicketAsignacion;
 use App\Models\User;
 use Illuminate\Support\Collection;
 
@@ -39,7 +39,7 @@ class NotificationService
     /**
      * Crea un registro de notificación en la tabla 'notificaciones' si está permitido.
      */
-    public function createInApp(User $user, string $tipo, string $titulo, string $mensaje, ?int $ticketId = null, ?array $datos = null): ?Notificacion
+    public function createInApp(User $user, string $tipo, string $titulo, string $mensaje, ?string $ticketCodigo = null, ?array $datos = null): ?Notificacion
     {
         if (!$this->isInAppActive()) {
             return null;
@@ -50,11 +50,11 @@ class NotificationService
         }
 
         return Notificacion::create([
-            'usuario_id'          => $user->id,
+            'usuario_ci'          => $user->ci,
             'tipo'                => $tipo,
             'titulo'              => $titulo,
             'mensaje'             => $mensaje,
-            'ticket_id'           => $ticketId,
+            'ticket_codigo'       => $ticketCodigo,
             'datos'               => $datos,
             'leida'               => false,
             'fecha_creacion'      => now(),
@@ -158,20 +158,24 @@ class NotificationService
 
     /**
      * PROCESO 4a: Solicitud de Reasignación enviada por un técnico.
-     * - Email + In-App: Administradores.
+     * - Email + In-App: Administradores / Cadena superior.
      */
-    public function notifyReassignmentRequested(Ticket $ticket, TicketAsignacion $reasignacion): void
+    public function notifyReassignmentRequested(Ticket $ticket, Asignacion $reasignacion): void
     {
         $ticket->loadMissing(['assignee']);
-        $reasignacion->loadMissing(['tecnico']);
-        $admins = $this->getAdmins();
+        $reasignacion->loadMissing(['participantes.usuario']);
+        $solicitante = $reasignacion->solicitante() ?? $ticket->assignee;
+        $propuesto = $reasignacion->tecnicoDestino();
+
+        // Aprobación jerárquica (D5): se notifica a la cadena superior del técnico solicitante
+        $admins = app(ReassignmentApprovalService::class)->approvers($reasignacion, $ticket);
 
         foreach ($admins as $admin) {
             $this->createInApp(
                 $admin,
                 Notificacion::TIPO_SOLICITUD_REASIGNACION,
                 "Solicitud de Reasignación: {$ticket->codigo}",
-                "{$ticket->assignee?->name} solicitó reasignar el ticket a {$reasignacion->tecnico?->name}.",
+                "{$solicitante?->name} solicitó reasignar el ticket a {$propuesto?->name}.",
                 $ticket->id,
                 ['ticket_id' => $ticket->id, 'reasignacion_id' => $reasignacion->id]
             );
@@ -185,7 +189,7 @@ class NotificationService
      * - Email: Creador del ticket y Nuevo Técnico.
      * - In-App: Nuevo Técnico y Técnico Anterior.
      */
-    public function notifyReassignmentApproved(Ticket $ticket, TicketAsignacion $reasignacion, User $newAgent, User $revisor): void
+    public function notifyReassignmentApproved(Ticket $ticket, Asignacion $reasignacion, User $newAgent, User $revisor): void
     {
         $ticket->loadMissing(['creator']);
 
@@ -194,7 +198,7 @@ class NotificationService
             $newAgent,
             Notificacion::TIPO_REASIGNACION_APROBADA,
             "Ticket Reasignado a tu cargo: {$ticket->codigo}",
-            "La Dirección te ha asignado el ticket {$ticket->codigo}. Motivo: {$reasignacion->motivo}.",
+            "La Dirección te ha asignado el ticket {$ticket->codigo}. Motivo: {$reasignacion->motivo_solicitud}.",
             $ticket->id
         );
 
@@ -205,7 +209,7 @@ class NotificationService
      * PROCESO 4c: Reasignación Rechazada por Administrador.
      * - Email + In-App: Técnico solicitante.
      */
-    public function notifyReassignmentRejected(Ticket $ticket, TicketAsignacion $reasignacion, User $requestingTechnician, User $revisor): void
+    public function notifyReassignmentRejected(Ticket $ticket, Asignacion $reasignacion, User $requestingTechnician, User $revisor): void
     {
         // Notificación In-App para el técnico que solicitó (como requirió el usuario)
         $this->createInApp(
@@ -219,6 +223,95 @@ class NotificationService
 
         // Correo electrónico
         $this->mailService->sendReassignmentRejected($ticket, $reasignacion, $requestingTechnician, $revisor);
+    }
+
+    /**
+     * PROCESO 5: Relevamiento (ascendente/descendente) o Devolución de un ticket.
+     * - In-App + Email: usuario receptor.
+     * - In-App: responsable anterior y jefes de la cadena superior del cargo destino.
+     * - Email + In-App (mensaje genérico, sin datos internos): solicitante del ticket.
+     * No se notifica al usuario que ejecutó la acción.
+     */
+    public function notifyTicketEscalated(Ticket $ticket, Asignacion $movimiento, User $actor, ?User $anterior, User $receptor): void
+    {
+        $ticket->loadMissing(['creator']);
+        $movimiento->loadMissing(['cargoDestino']);
+        $cargo = $movimiento->cargoDestino;
+
+        $esDevolucion = $movimiento->tipo_origen === Asignacion::TIPO_DEVOLUCION;
+        $tipoNotif = $esDevolucion ? Notificacion::TIPO_TICKET_DEVUELTO : Notificacion::TIPO_TICKET_RELEVADO;
+        $accion = match ($movimiento->tipo_origen) {
+            Asignacion::TIPO_RELEVAMIENTO_ASCENDENTE  => 'relevado a un nivel superior',
+            Asignacion::TIPO_RELEVAMIENTO_DESCENDENTE => 'relevado a un nivel inferior',
+            default                                   => 'devuelto al nivel anterior',
+        };
+        $cargoTxt = $cargo ? "{$cargo->nombre} (Nivel {$cargo->nivel})" : 'otro nivel';
+        $datos = [
+            'ticket_id'       => $ticket->id,
+            'tipo_movimiento' => $movimiento->tipo_origen,
+            'cargo_destino'   => $cargo?->codigo,
+            'realizado_por'   => $actor->name,
+        ];
+
+        $notificados = [$actor->id => true];
+
+        // 1. Receptor
+        if (!isset($notificados[$receptor->id])) {
+            $this->createInApp(
+                $receptor,
+                $tipoNotif,
+                ($esDevolucion ? 'Ticket devuelto a tu cargo: ' : 'Ticket relevado a tu cargo: ') . $ticket->codigo,
+                "{$actor->name} te ha {$accion} el ticket {$ticket->codigo}. " . ($esDevolucion ? 'Instrucciones: ' : 'Motivo: ') . $movimiento->motivo_solicitud,
+                $ticket->id,
+                $datos
+            );
+            $notificados[$receptor->id] = true;
+        }
+
+        // 2. Responsable anterior
+        if ($anterior && !isset($notificados[$anterior->id])) {
+            $this->createInApp(
+                $anterior,
+                $tipoNotif,
+                "Ticket {$ticket->codigo} {$accion}",
+                "El ticket {$ticket->codigo} fue {$accion} por {$actor->name} y ahora lo atiende {$receptor->name} ({$cargoTxt}).",
+                $ticket->id,
+                $datos
+            );
+            $notificados[$anterior->id] = true;
+        }
+
+        // 3. Jefes: personal activo de la cadena superior del cargo destino
+        if ($cargo) {
+            $jefes = User::whereIn('cargo_codigo', $cargo->codigosSuperiores())->where('activo', true)->get();
+            foreach ($jefes as $jefe) {
+                if (isset($notificados[$jefe->id])) continue;
+                $this->createInApp(
+                    $jefe,
+                    $tipoNotif,
+                    "Ticket {$ticket->codigo} {$accion}",
+                    "{$actor->name} ha {$accion} el ticket {$ticket->codigo} a {$receptor->name} ({$cargoTxt}).",
+                    $ticket->id,
+                    $datos
+                );
+                $notificados[$jefe->id] = true;
+            }
+        }
+
+        // 4. Solicitante (mensaje genérico, sin nombres ni cargos internos)
+        $solicitante = $ticket->creator;
+        if ($solicitante && !isset($notificados[$solicitante->id])) {
+            $this->createInApp(
+                $solicitante,
+                $tipoNotif,
+                "Actualización de tu ticket {$ticket->codigo}",
+                'Tu ticket fue derivado a otro nivel de atención para su resolución.',
+                $ticket->id,
+                ['ticket_id' => $ticket->id]
+            );
+        }
+
+        $this->mailService->sendTicketEscalated($ticket, $movimiento, $actor, $receptor, $solicitante);
     }
 
     /**
